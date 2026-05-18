@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:home_widget/home_widget.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:ota_update/ota_update.dart';
@@ -123,7 +124,9 @@ class AppSettings {
   );
 }
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await initializeDateFormatting('de_DE', null);
   runApp(const MyApp());
 }
 
