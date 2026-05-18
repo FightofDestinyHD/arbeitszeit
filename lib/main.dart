@@ -14,6 +14,31 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:table_calendar/table_calendar.dart';
 
+// --- Schichtvorlage für einfache Schichteinträge ---
+class ShiftTemplate {
+  final String name;
+  final TimeOfDay start;
+  final TimeOfDay end;
+
+  ShiftTemplate({required this.name, required this.start, required this.end});
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'start': '${start.hour}:${start.minute}',
+        'end': '${end.hour}:${end.minute}',
+      };
+
+  static ShiftTemplate fromJson(Map<String, dynamic> json) {
+    final startParts = (json['start'] as String).split(':');
+    final endParts = (json['end'] as String).split(':');
+    return ShiftTemplate(
+      name: json['name'] as String,
+      start: TimeOfDay(hour: int.parse(startParts[0]), minute: int.parse(startParts[1])),
+      end: TimeOfDay(hour: int.parse(endParts[0]), minute: int.parse(endParts[1])),
+    );
+  }
+}
+
 class WorkSession {
   const WorkSession({required this.start, required this.end});
 
@@ -179,6 +204,9 @@ class WorkTimeHomePage extends StatefulWidget {
 }
 
 class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
+    static const String shiftTemplatesKey = 'shift_templates';
+
+    List<ShiftTemplate> shiftTemplates = [];
   static const String githubOwner = 'FightofDestinyHD';
   static const String githubRepo = 'arbeitszeit';
   static const String githubLatestReleaseUrl =
@@ -229,6 +257,11 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
 
   Future<void> restoreState() async {
     final prefs = await SharedPreferences.getInstance();
+    // Schichtvorlagen laden
+    final templatesRaw = prefs.getStringList(shiftTemplatesKey) ?? [];
+    shiftTemplates = templatesRaw
+        .map((e) => ShiftTemplate.fromJson(jsonDecode(e) as Map<String, dynamic>))
+        .toList();
 
     final rawSessions = prefs.getStringList(sessionsKey) ?? [];
     final restoredSessions = <WorkSession>[];
@@ -273,6 +306,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
 
   Future<void> persistState() async {
     final prefs = await SharedPreferences.getInstance();
+    // Schichtvorlagen speichern
+    final encodedTemplates = shiftTemplates.map((t) => jsonEncode(t.toJson())).toList();
+    await prefs.setStringList(shiftTemplatesKey, encodedTemplates);
     final encodedSessions = sessions
         .map((session) => jsonEncode(session.toJson()))
         .toList();
@@ -443,6 +479,130 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   Future<void> setSelectedDayType(DayType type) async {
     setState(() {
       dayTypes[dayKey(selectedDay)] = type;
+    });
+    await persistState();
+  }
+
+  String formatTimeOfDay(TimeOfDay time) {
+    final hour = time.hour.toString().padLeft(2, '0');
+    final minute = time.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
+  }
+
+  TimeOfDay? parseTimeInput(String input) {
+    final normalized = input.trim().replaceAll('.', ':');
+    final parts = normalized.split(':');
+    if (parts.length != 2) {
+      return null;
+    }
+
+    final hour = int.tryParse(parts[0]);
+    final minute = int.tryParse(parts[1]);
+    if (hour == null || minute == null) {
+      return null;
+    }
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+      return null;
+    }
+    return TimeOfDay(hour: hour, minute: minute);
+  }
+
+  Future<void> addShiftFromTemplate(ShiftTemplate template, DateTime day) async {
+    final start = DateTime(
+      day.year,
+      day.month,
+      day.day,
+      template.start.hour,
+      template.start.minute,
+    );
+    var end = DateTime(
+      day.year,
+      day.month,
+      day.day,
+      template.end.hour,
+      template.end.minute,
+    );
+
+    if (!end.isAfter(start)) {
+      end = end.add(const Duration(days: 1));
+    }
+
+    setState(() {
+      sessions.insert(0, WorkSession(start: start, end: end));
+      dayTypes[dayKey(day)] = DayType.worked;
+    });
+    await persistState();
+    await syncWidgetData();
+  }
+
+  Future<void> showTemplateDialog({ShiftTemplate? template, int? index}) async {
+    final nameController = TextEditingController(text: template?.name ?? '');
+    final startController = TextEditingController(
+      text: template == null ? '08:00' : formatTimeOfDay(template.start),
+    );
+    final endController = TextEditingController(
+      text: template == null ? '16:00' : formatTimeOfDay(template.end),
+    );
+
+    final result = await showDialog<ShiftTemplate>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(template == null ? 'Vorlage erstellen' : 'Vorlage bearbeiten'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(labelText: 'Name (z.B. Frühschicht)'),
+              ),
+              TextField(
+                controller: startController,
+                decoration: const InputDecoration(labelText: 'Start (HH:mm)'),
+                keyboardType: TextInputType.datetime,
+              ),
+              TextField(
+                controller: endController,
+                decoration: const InputDecoration(labelText: 'Ende (HH:mm)'),
+                keyboardType: TextInputType.datetime,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Abbrechen'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final name = nameController.text.trim();
+                final start = parseTimeInput(startController.text);
+                final end = parseTimeInput(endController.text);
+                if (name.isEmpty || start == null || end == null) {
+                  return;
+                }
+                Navigator.pop(
+                  context,
+                  ShiftTemplate(name: name, start: start, end: end),
+                );
+              },
+              child: const Text('Speichern'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (result == null) {
+      return;
+    }
+
+    setState(() {
+      if (index == null) {
+        shiftTemplates.add(result);
+      } else {
+        shiftTemplates[index] = result;
+      }
     });
     await persistState();
   }
@@ -1017,50 +1177,76 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
         Card(
           child: Padding(
             padding: const EdgeInsets.all(8),
-            child: TableCalendar<dynamic>(
-              locale: 'de_DE',
-              firstDay: DateTime(2020, 1, 1),
-              lastDay: DateTime(2100, 12, 31),
-              focusedDay: focusedDay,
-              selectedDayPredicate: (day) => isSameDay(day, selectedDay),
-              onDaySelected: (selected, focused) {
-                setState(() {
-                  selectedDay = selected;
-                  focusedDay = focused;
-                });
-              },
-              eventLoader: (day) {
-                final type = effectiveDayType(day);
-                if (type == DayType.free) {
-                  return const [];
-                }
-                return [type.name];
-              },
-              calendarBuilders: CalendarBuilders(
-                markerBuilder: (context, day, events) {
-                  if (events.isEmpty) {
-                    return const SizedBox.shrink();
-                  }
-                  final type = effectiveDayType(day);
-                  return Align(
-                    alignment: Alignment.bottomCenter,
-                    child: Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: colorForDayType(type, context),
-                        shape: BoxShape.circle,
-                      ),
+            child: Column(
+              children: [
+                TableCalendar<dynamic>(
+                  locale: 'de_DE',
+                  firstDay: DateTime(2020, 1, 1),
+                  lastDay: DateTime(2100, 12, 31),
+                  calendarStyle: CalendarStyle(
+                    todayDecoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.25),
+                      shape: BoxShape.circle,
                     ),
-                  );
-                },
-              ),
+                    selectedDecoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  focusedDay: focusedDay,
+                  selectedDayPredicate: (day) => isSameDay(day, selectedDay),
+                  onDaySelected: (selected, focused) {
+                    setState(() {
+                      selectedDay = selected;
+                      focusedDay = focused;
+                    });
+                  },
+                  eventLoader: (day) {
+                    final type = effectiveDayType(day);
+                    if (type == DayType.free) {
+                      return const [];
+                    }
+                    return [type.name];
+                  },
+                  calendarBuilders: CalendarBuilders(
+                    markerBuilder: (context, day, events) {
+                      if (events.isEmpty) {
+                        return const SizedBox.shrink();
+                      }
+                      final type = effectiveDayType(day);
+                      return Align(
+                        alignment: Alignment.bottomCenter,
+                        child: Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: colorForDayType(type, context),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Schicht für ${DateFormat('dd.MM.yyyy').format(selectedDay)}'),
+                    IconButton(
+                      icon: const Icon(Icons.add),
+                      tooltip: 'Schicht eintragen',
+                      onPressed: () => _showShiftDialog(context, selectedDay),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
         ),
         const SizedBox(height: 12),
         Text(
-          'Status fuer ${DateFormat('dd.MM.yyyy').format(selectedDay)}',
+          'Status für ${DateFormat('dd.MM.yyyy').format(selectedDay)}',
           style: Theme.of(context).textTheme.titleMedium,
         ),
         const SizedBox(height: 8),
@@ -1072,14 +1258,184 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                 (type) => ChoiceChip(
                   label: Text(labelForDayType(type)),
                   selected: selectedType == type,
-                  selectedColor: colorForDayType(type, context).withValues(alpha: 0.2),
+                  selectedColor: colorForDayType(type, context).withAlpha(50),
                   onSelected: (_) => setSelectedDayType(type),
                 ),
               )
               .toList(),
         ),
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Schichtvorlagen', style: Theme.of(context).textTheme.titleMedium),
+                    IconButton(
+                      onPressed: () => showTemplateDialog(),
+                      icon: const Icon(Icons.add_circle_outline),
+                      tooltip: 'Vorlage erstellen',
+                    ),
+                  ],
+                ),
+                if (shiftTemplates.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: Text('Noch keine Vorlagen vorhanden.'),
+                  ),
+                ...shiftTemplates.asMap().entries.map(
+                  (entry) {
+                    final idx = entry.key;
+                    final template = entry.value;
+                    return ListTile(
+                      dense: true,
+                      title: Text(template.name),
+                      subtitle: Text(
+                        '${formatTimeOfDay(template.start)} - ${formatTimeOfDay(template.end)}',
+                      ),
+                      trailing: Wrap(
+                        spacing: 8,
+                        children: [
+                          IconButton(
+                            onPressed: () => showTemplateDialog(template: template, index: idx),
+                            icon: const Icon(Icons.edit_outlined),
+                            tooltip: 'Vorlage bearbeiten',
+                          ),
+                          IconButton(
+                            onPressed: () async {
+                              await addShiftFromTemplate(template, selectedDay);
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      'Vorlage "${template.name}" auf ${DateFormat('dd.MM.yyyy').format(selectedDay)} angewendet.',
+                                    ),
+                                  ),
+                                );
+                              }
+                            },
+                            icon: const Icon(Icons.playlist_add_check_circle_outlined),
+                            tooltip: 'Auf ausgewählten Tag anwenden',
+                          ),
+                          IconButton(
+                            onPressed: () async {
+                              setState(() {
+                                shiftTemplates.removeAt(idx);
+                              });
+                              await persistState();
+                            },
+                            icon: const Icon(Icons.delete_outline),
+                            tooltip: 'Vorlage löschen',
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
       ],
     );
+  }
+
+  Future<void> _showShiftDialog(BuildContext context, DateTime day) async {
+    final startController = TextEditingController();
+    final endController = TextEditingController();
+    ShiftTemplate? selectedTemplate;
+
+    final result = await showDialog<WorkSession>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Schicht eintragen'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButtonFormField<ShiftTemplate>(
+                    value: selectedTemplate,
+                    hint: const Text('Vorlage wählen'),
+                    items: shiftTemplates
+                        .map((template) => DropdownMenuItem(
+                              value: template,
+                              child: Text(template.name),
+                            ))
+                        .toList(),
+                    onChanged: (template) {
+                      setState(() {
+                        selectedTemplate = template;
+                        if (template != null) {
+                          startController.text = formatTimeOfDay(template.start);
+                          endController.text = formatTimeOfDay(template.end);
+                        }
+                      });
+                    },
+                  ),
+                  TextField(
+                    controller: startController,
+                    decoration: const InputDecoration(labelText: 'Start (HH:mm)'),
+                    keyboardType: TextInputType.datetime,
+                  ),
+                  TextField(
+                    controller: endController,
+                    decoration: const InputDecoration(labelText: 'Ende (HH:mm)'),
+                    keyboardType: TextInputType.datetime,
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Abbrechen'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    final startTime = parseTimeInput(startController.text);
+                    final endTime = parseTimeInput(endController.text);
+                    if (startTime != null && endTime != null) {
+                      final start = DateTime(
+                        day.year,
+                        day.month,
+                        day.day,
+                        startTime.hour,
+                        startTime.minute,
+                      );
+                      var end = DateTime(
+                        day.year,
+                        day.month,
+                        day.day,
+                        endTime.hour,
+                        endTime.minute,
+                      );
+                      if (!end.isAfter(start)) {
+                        end = end.add(const Duration(days: 1));
+                      }
+                      Navigator.pop(context, WorkSession(start: start, end: end));
+                    }
+                  },
+                  child: const Text('Speichern'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    if (result != null) {
+      setState(() {
+        sessions.insert(0, result);
+        dayTypes[dayKey(day)] = DayType.worked;
+      });
+      await persistState();
+      await syncWidgetData();
+    }
   }
 
   Widget buildStatsTab() {
