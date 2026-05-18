@@ -81,18 +81,42 @@ jobs:
           storeFile=arbeitszeit.jks
           EOF
 
+      - name: Derive version metadata
+        id: version
+        shell: bash
+        run: |
+          TAG_VERSION=$(echo "$GITHUB_REF" | sed 's/refs\/tags\///')
+          BUILD_NAME=$(echo "$TAG_VERSION" | sed 's/^[vV]//')
+          MAJOR=$(echo "$BUILD_NAME" | cut -d. -f1)
+          MINOR=$(echo "$BUILD_NAME" | cut -d. -f2)
+          PATCH=$(echo "$BUILD_NAME" | cut -d. -f3)
+
+          MAJOR=${MAJOR:-0}
+          MINOR=${MINOR:-0}
+          PATCH=${PATCH:-0}
+
+          BUILD_NUMBER=$((MAJOR * 10000 + MINOR * 100 + PATCH))
+
+          echo "tag_version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
+          echo "build_name=$BUILD_NAME" >> "$GITHUB_OUTPUT"
+          echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+
       - name: Build APK (release)
         working-directory: ${{ steps.project.outputs.dir }}
-        run: flutter build apk --release
+        run: |
+          flutter build apk --release \
+            --build-name="${{ steps.version.outputs.build_name }}" \
+            --build-number="${{ steps.version.outputs.build_number }}"
 
       - name: Generate update.json
         working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
-          VERSION=$(echo $GITHUB_REF | sed 's/refs\/tags\///')
+          VERSION="${{ steps.version.outputs.tag_version }}"
+          BUILD_NUMBER="${{ steps.version.outputs.build_number }}"
           APK_URL="https://github.com/${{ github.repository }}/releases/download/${VERSION}/app-release.apk"
           NOTES=$(git tag -l --format='%(contents)' $VERSION | head -n 1)
-          echo "{\"version\": \"$VERSION\", \"apk_url\": \"$APK_URL\", \"notes\": \"$NOTES\"}" > update.json
+          echo "{\"version\": \"$VERSION\", \"build_number\": $BUILD_NUMBER, \"apk_url\": \"$APK_URL\", \"notes\": \"$NOTES\"}" > update.json
 
       - name: Upload APK & update.json to Release
         uses: softprops/action-gh-release@v2

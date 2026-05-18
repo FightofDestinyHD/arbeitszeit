@@ -181,17 +181,25 @@ class UpdateManifest {
     required this.version,
     required this.apkUrl,
     required this.notes,
+    required this.buildNumber,
   });
 
   final String version;
   final String apkUrl;
   final String notes;
+  final int buildNumber;
 
   static UpdateManifest fromJson(Map<String, dynamic> json) {
+    final rawBuild = json['build_number'];
+    final parsedBuild = rawBuild is int
+        ? rawBuild
+        : int.tryParse((rawBuild as String? ?? '').trim()) ?? 0;
+
     return UpdateManifest(
       version: (json['version'] as String? ?? '').trim(),
       apkUrl: (json['apk_url'] as String? ?? '').trim(),
       notes: (json['notes'] as String? ?? '').trim(),
+      buildNumber: parsedBuild,
     );
   }
 }
@@ -854,6 +862,19 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     return clean.isEmpty ? '0' : clean;
   }
 
+  int buildNumberFromVersion(String raw) {
+    final parts = normalizedVersion(raw)
+        .split('.')
+        .map((e) => int.tryParse(e) ?? 0)
+        .toList();
+
+    final major = parts.isNotEmpty ? parts[0] : 0;
+    final minor = parts.length > 1 ? parts[1] : 0;
+    final patch = parts.length > 2 ? parts[2] : 0;
+
+    return major * 10000 + minor * 100 + patch;
+  }
+
   UpdateManifest parseGithubRelease(Map<String, dynamic> json) {
     final tagName = (json['tag_name'] as String? ?? '').trim();
     final releaseName = (json['name'] as String? ?? '').trim();
@@ -888,6 +909,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       version: version,
       apkUrl: apkUrl,
       notes: releaseBody,
+      buildNumber: buildNumberFromVersion(version),
     );
   }
 
@@ -953,14 +975,18 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     try {
       final packageInfo = await PackageInfo.fromPlatform();
       final currentVersion = packageInfo.version;
+      final currentBuildNumber =
+          int.tryParse(packageInfo.buildNumber.trim()) ?? 0;
       final manifest = await fetchUpdateManifest();
 
-      final hasUpdate = compareVersions(manifest.version, currentVersion) > 0;
+      final hasUpdate = manifest.buildNumber > 0 && currentBuildNumber > 0
+          ? manifest.buildNumber > currentBuildNumber
+          : compareVersions(manifest.version, currentVersion) > 0;
       setState(() {
         availableUpdate = hasUpdate ? manifest : null;
         updateMessage = hasUpdate
-            ? 'Update ${manifest.version} verfuegbar.'
-            : 'App ist aktuell (Version $currentVersion).';
+            ? 'Update ${manifest.version} verfuegbar (Build ${manifest.buildNumber}).'
+            : 'App ist aktuell (Version $currentVersion, Build $currentBuildNumber).';
       });
     } catch (e) {
       setState(() {

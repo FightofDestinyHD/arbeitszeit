@@ -1,5 +1,6 @@
 {
   "version": "1.0.1",
+  "build_number": 10001,
   "apk_url": "https://github.com/FightofDestinyHD/arbeitszeit/releases/latest/download/app-release.apk",
   "notes": "Stabiles App-Update"
 }
