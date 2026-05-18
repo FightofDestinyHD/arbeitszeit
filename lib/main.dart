@@ -180,6 +180,16 @@ class _StatsData {
   final Map<int, Duration> byWeekday;
 }
 
+class _WeeklyBalance {
+  const _WeeklyBalance({
+    required this.label,
+    required this.balance,
+  });
+
+  final String label;
+  final Duration balance;
+}
+
 class UpdateManifest {
   const UpdateManifest({
     required this.version,
@@ -683,6 +693,148 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     );
   }
 
+  List<_WeeklyBalance> buildWeeklyBalances(DateTime month) {
+    final firstDay = DateTime(month.year, month.month, 1);
+    final lastDay = DateTime(month.year, month.month + 1, 0);
+    final targetPerDay = targetPerWorkday(month);
+    final weeks = <int, Duration>{};
+
+    for (var day = firstDay; !day.isAfter(lastDay); day = day.add(const Duration(days: 1))) {
+      final normalizedDay = DateTime(day.year, day.month, day.day);
+      final weekIndex = ((normalizedDay.day - 1) ~/ 7) + 1;
+      final hasSession = sessions.any((session) => isSameDay(session.start, normalizedDay));
+      final effectiveType = effectiveDayType(normalizedDay);
+
+      Duration dayBalance = Duration.zero;
+      if (hasSession) {
+        final worked = sessions
+            .where((session) => isSameDay(session.start, normalizedDay))
+            .fold(Duration.zero, (total, session) => total + session.duration);
+        dayBalance = worked - targetPerDay;
+      } else if (effectiveType == DayType.vacation || effectiveType == DayType.sick) {
+        dayBalance = Duration.zero;
+      } else if (normalizedDay.weekday >= DateTime.monday &&
+          normalizedDay.weekday <= DateTime.friday) {
+        dayBalance = -targetPerDay;
+      }
+
+      weeks[weekIndex] = (weeks[weekIndex] ?? Duration.zero) + dayBalance;
+    }
+
+    return weeks.entries
+        .map((entry) => _WeeklyBalance(label: 'W${entry.key}', balance: entry.value))
+        .toList()
+      ..sort((left, right) => left.label.compareTo(right.label));
+  }
+
+  Color colorForBalance(Duration balance, BuildContext context) {
+    if (balance.isNegative) {
+      return Colors.red.shade600;
+    }
+    if (balance > Duration.zero) {
+      return Colors.green.shade600;
+    }
+    return Theme.of(context).colorScheme.primary;
+  }
+
+  String labelForBalance(Duration balance) {
+    if (balance.isNegative) {
+      return 'Minusstunden';
+    }
+    if (balance > Duration.zero) {
+      return 'Plusstunden';
+    }
+    return 'Ausgeglichen';
+  }
+
+  Widget buildBalanceCard({
+    required BuildContext context,
+    required String title,
+    required Duration balance,
+    required IconData icon,
+  }) {
+    final color = colorForBalance(balance, context);
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: color),
+          const SizedBox(height: 12),
+          Text(title, style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 6),
+          Text(
+            formatDuration(balance),
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          const SizedBox(height: 4),
+          Text(labelForBalance(balance), style: TextStyle(color: color)),
+        ],
+      ),
+    );
+  }
+
+  Widget buildWeeklyBalanceChart(BuildContext context, List<_WeeklyBalance> balances) {
+    if (balances.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final maxMinutes = balances
+        .map((entry) => entry.balance.inMinutes.abs())
+        .fold<int>(0, (maxValue, value) => value > maxValue ? value : maxValue);
+    final safeMax = maxMinutes == 0 ? 1 : maxMinutes;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Wochenbilanz', style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 12),
+        ...balances.map((entry) {
+          final color = colorForBalance(entry.balance, context);
+          final ratio = entry.balance.inMinutes.abs() / safeMax;
+
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Row(
+              children: [
+                SizedBox(width: 34, child: Text(entry.label)),
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(999),
+                    child: LinearProgressIndicator(
+                      value: ratio.clamp(0, 1),
+                      minHeight: 14,
+                      backgroundColor: color.withValues(alpha: 0.16),
+                      valueColor: AlwaysStoppedAnimation<Color>(color),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 82,
+                  child: Text(
+                    formatDuration(entry.balance),
+                    textAlign: TextAlign.right,
+                    style: TextStyle(color: color, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
   Future<void> syncWidgetData() async {
     final overview = buildOverviewData();
     await HomeWidget.saveWidgetData<String>(
@@ -696,6 +848,18 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     await HomeWidget.saveWidgetData<String>(
       'status_text',
       overview.isWorking ? 'eingestempelt' : 'ausgestempelt',
+    );
+    await HomeWidget.saveWidgetData<String>(
+      'month_balance',
+      formatDuration(overview.monthOverUnder),
+    );
+    await HomeWidget.saveWidgetData<bool>(
+      'is_working',
+      overview.isWorking,
+    );
+    await HomeWidget.saveWidgetData<String?>(
+      'active_start_millis',
+      overview.activeSince?.millisecondsSinceEpoch.toString(),
     );
     await HomeWidget.updateWidget(
       name: 'ArbeitszeitWidgetProvider',
@@ -1116,6 +1280,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
 
   Widget buildOverviewTab() {
     final data = buildOverviewData();
+    final monthColor = colorForBalance(data.monthOverUnder, context);
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -1165,6 +1330,28 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
               ],
             ),
           ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: buildBalanceCard(
+                context: context,
+                title: 'Monatsbilanz',
+                balance: data.monthOverUnder,
+                icon: Icons.stacked_line_chart,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: buildBalanceCard(
+                context: context,
+                title: 'Heute',
+                balance: data.today - targetPerWorkday(DateTime.now()),
+                icon: Icons.today,
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 12),
         Card(
@@ -1273,6 +1460,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                   data.monthOverUnder.isNegative
                       ? 'Minusstunden: ${formatDuration(data.monthOverUnder)}'
                       : 'Ueberstunden: ${formatDuration(data.monthOverUnder)}',
+                  style: TextStyle(color: monthColor, fontWeight: FontWeight.w600),
                 ),
               ],
             ),
@@ -1641,6 +1829,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
 
   Widget buildStatsTab() {
     final stats = buildStatsData();
+    final weeklyBalances = buildWeeklyBalances(DateTime.now());
     const weekdayLabels = <int, String>{
       DateTime.monday: 'Mo',
       DateTime.tuesday: 'Di',
@@ -1668,9 +1857,20 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                   stats.monthOvertime.isNegative
                       ? 'Minusstunden im Monat: ${formatDuration(stats.monthOvertime)}'
                       : 'Ueberstunden im Monat: ${formatDuration(stats.monthOvertime)}',
+                  style: TextStyle(
+                    color: colorForBalance(stats.monthOvertime, context),
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ],
             ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: buildWeeklyBalanceChart(context, weeklyBalances),
           ),
         ),
         const SizedBox(height: 12),
