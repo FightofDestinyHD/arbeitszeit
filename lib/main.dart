@@ -1201,25 +1201,30 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     Widget buildDayCell(DateTime day, {bool selected = false, bool today = false}) {
       final type = effectiveDayType(day);
       final baseColor = colorForDayType(type, context);
+      final isWeekend = day.weekday == DateTime.saturday || day.weekday == DateTime.sunday;
 
       Color backgroundColor;
       Color textColor;
       BoxBorder? border;
 
       if (selected) {
-        backgroundColor = baseColor;
+        backgroundColor = theme.colorScheme.primary;
         textColor = Colors.white;
-        border = Border.all(color: theme.colorScheme.onSurface.withValues(alpha: 0.15));
+        border = Border.all(color: theme.colorScheme.primary, width: 1.5);
       } else if (today) {
-        backgroundColor = baseColor.withValues(alpha: 0.25);
+        backgroundColor = theme.colorScheme.secondary.withValues(alpha: 0.28);
         textColor = theme.colorScheme.onSurface;
-        border = Border.all(color: theme.colorScheme.primary, width: 1.2);
+        border = Border.all(color: theme.colorScheme.secondary, width: 1.4);
       } else if (type == DayType.free) {
-        backgroundColor = Colors.grey.shade200;
+        backgroundColor = isWeekend
+            ? Colors.amber.shade100
+            : Colors.lightBlue.shade50;
         textColor = theme.colorScheme.onSurface;
+        border = Border.all(color: Colors.blueGrey.shade100);
       } else {
         backgroundColor = baseColor.withValues(alpha: 0.18);
         textColor = theme.colorScheme.onSurface;
+        border = Border.all(color: baseColor.withValues(alpha: 0.45));
       }
 
       return Center(
@@ -1327,13 +1332,24 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                 const Text('Tippen: Tag auswählen. Lange tippen: Schicht direkt eintragen.'),
                 const SizedBox(height: 8),
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Schicht für ${DateFormat('dd.MM.yyyy').format(selectedDay)}'),
-                    IconButton(
-                      icon: const Icon(Icons.add),
-                      tooltip: 'Schicht eintragen',
-                      onPressed: () => _showShiftDialog(context, selectedDay),
+                    Expanded(
+                      child: Text(
+                        'Ausgewählt: ${DateFormat('dd.MM.yyyy').format(selectedDay)}',
+                        style: theme.textTheme.titleSmall,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: () => _showShiftDialog(context, selectedDay),
+                        icon: const Icon(Icons.add),
+                        label: const Text('Schicht für Tag eintragen'),
+                      ),
                     ),
                   ],
                 ),
