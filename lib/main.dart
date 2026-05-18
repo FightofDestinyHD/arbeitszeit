@@ -212,7 +212,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   static const String githubLatestReleaseUrl =
       'https://api.github.com/repos/$githubOwner/$githubRepo/releases/latest';
   static const String updateManifestUrl =
-      'https://raw.githubusercontent.com/FightofDestinyHD/arbeitszeit/main/update.json';
+      'https://github.com/$githubOwner/$githubRepo/releases/latest/download/update.json';
 
   static const String sessionsKey = 'work_sessions';
   static const String activeStartKey = 'active_start';
