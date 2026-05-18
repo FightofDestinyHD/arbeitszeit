@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*.*.*'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -23,13 +26,39 @@ jobs:
         with:
           flutter-version: '3.19.6'
 
+      - name: Detect Flutter project root
+        id: project
+        shell: bash
+        run: |
+          if [ -f "pubspec.yaml" ]; then
+            echo "dir=." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          MATCHES=$(find . -maxdepth 3 -name pubspec.yaml | sed 's|^./||')
+          COUNT=$(echo "$MATCHES" | grep -c . || true)
+
+          if [ "$COUNT" -eq 1 ]; then
+            DIR=$(dirname "$(echo "$MATCHES" | head -n 1)")
+            echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Expected exactly one Flutter project root (pubspec.yaml), found: $COUNT"
+          echo "$MATCHES"
+          exit 1
+
       - name: Install dependencies
+        working-directory: ${{ steps.project.outputs.dir }}
         run: flutter pub get
 
       - name: Build APK (release)
+        working-directory: ${{ steps.project.outputs.dir }}
         run: flutter build apk --release
 
       - name: Generate update.json
+        working-directory: ${{ steps.project.outputs.dir }}
+        shell: bash
         run: |
           VERSION=$(echo $GITHUB_REF | sed 's/refs\/tags\///')
           APK_URL="https://github.com/${{ github.repository }}/releases/download/${VERSION}/app-release.apk"
@@ -40,7 +69,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            build/app/outputs/flutter-apk/app-release.apk
-            update.json
+            ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/app-release.apk
+            ${{ steps.project.outputs.dir }}/update.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
