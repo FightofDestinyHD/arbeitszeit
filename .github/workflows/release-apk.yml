@@ -1,0 +1,46 @@
+name: Build & Release APK
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.6'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build APK (release)
+        run: flutter build apk --release
+
+      - name: Generate update.json
+        run: |
+          VERSION=$(echo $GITHUB_REF | sed 's/refs\/tags\///')
+          APK_URL="https://github.com/${{ github.repository }}/releases/download/${VERSION}/app-release.apk"
+          NOTES=$(git tag -l --format='%(contents)' $VERSION | head -n 1)
+          echo "{\"version\": \"$VERSION\", \"apk_url\": \"$APK_URL\", \"notes\": \"$NOTES\"}" > update.json
+
+      - name: Upload APK & update.json to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/app/outputs/flutter-apk/app-release.apk
+            update.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
