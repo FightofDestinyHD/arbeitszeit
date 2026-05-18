@@ -1,0 +1,37 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Flutter Test (Puro)",
+			"type": "shell",
+			"command": "C:\\Users\\andre\\AppData\\Local\\Microsoft\\WinGet\\Packages\\pingbird.Puro_Microsoft.Winget.Source_8wekyb3d8bbwe\\puro.exe",
+			"args": [
+				"flutter",
+				"test"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "Flutter Test (Puro)",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"$env:Path += ';C:\\Program Files\\Git\\cmd'; & 'C:\\Users\\andre\\AppData\\Local\\Microsoft\\WinGet\\Packages\\pingbird.Puro_Microsoft.Winget.Source_8wekyb3d8bbwe\\puro.exe' flutter test"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "Flutter Test (Puro)",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"$env:Path += ';C:\\Program Files\\Git\\cmd'; & 'C:\\Users\\andre\\AppData\\Local\\Microsoft\\WinGet\\Packages\\pingbird.Puro_Microsoft.Winget.Source_8wekyb3d8bbwe\\puro.exe' flutter test"
+			],
+			"isBackground": false
+		}
+	]
+}
