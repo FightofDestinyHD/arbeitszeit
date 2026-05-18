@@ -14,6 +14,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:table_calendar/table_calendar.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 // --- Schichtvorlage für einfache Schichteinträge ---
 class ShiftTemplate {
@@ -1020,25 +1021,95 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       updateMessage = 'Update wird heruntergeladen...';
     });
 
+    StreamSubscription<dynamic>? subscription;
     try {
-      OtaUpdate().execute(
+      final done = Completer<void>();
+      subscription = OtaUpdate().execute(
         manifest.apkUrl,
         destinationFilename: 'arbeitszeit_${manifest.version.replaceAll('.', '_')}.apk',
       ).listen((event) {
         if (!mounted) {
           return;
         }
+        final status = event.status.toString();
+        final value = event.value.toString();
+
         setState(() {
-          updateMessage = event.value;
+          if (status.contains('INSTALLING')) {
+            updateMessage =
+                'Download fertig. Android-Installer wird gestartet...';
+          } else if (status.contains('DOWNLOADING')) {
+            updateMessage = value;
+          } else if (status.contains('ALREADY_RUNNING_ERROR') ||
+              status.contains('PERMISSION_NOT_GRANTED_ERROR') ||
+              status.contains('INSTALL_FAILED')) {
+            updateMessage =
+                'In-App-Installation fehlgeschlagen. Nutze "APK im Browser öffnen".';
+            if (!done.isCompleted) {
+              done.complete();
+            }
+          } else {
+            updateMessage = value;
+          }
         });
+
+        if (status.contains('INSTALLING') || status.contains('INSTALLED')) {
+          if (!done.isCompleted) {
+            done.complete();
+          }
+        }
+      }, onError: (error) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          updateMessage =
+              'Update-Installation fehlgeschlagen. Nutze "APK im Browser öffnen".';
+        });
+        if (!done.isCompleted) {
+          done.complete();
+        }
+      });
+
+      await done.future.timeout(const Duration(minutes: 3), onTimeout: () {
+        if (mounted) {
+          setState(() {
+            updateMessage =
+                'Installer reagiert nicht. Bitte "APK im Browser öffnen" nutzen.';
+          });
+        }
       });
     } catch (e) {
       setState(() {
-        updateMessage = 'Update-Installation fehlgeschlagen: $e';
+        updateMessage =
+            'Update-Installation fehlgeschlagen: $e. Nutze "APK im Browser öffnen".';
       });
     } finally {
+      await subscription?.cancel();
       setState(() {
         installingUpdate = false;
+      });
+    }
+  }
+
+  Future<void> openUpdateInBrowser() async {
+    final manifest = availableUpdate;
+    if (manifest == null) {
+      return;
+    }
+
+    final uri = Uri.tryParse(manifest.apkUrl);
+    if (uri == null) {
+      setState(() {
+        updateMessage = 'APK-URL ist ungültig.';
+      });
+      return;
+    }
+
+    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!launched && mounted) {
+      setState(() {
+        updateMessage = 'Konnte APK-Link nicht im Browser öffnen.';
       });
     }
   }
@@ -1155,6 +1226,20 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                         label: Text(installingUpdate
                             ? 'Installiere...'
                             : 'Update installieren'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextButton.icon(
+                        onPressed: availableUpdate == null
+                            ? null
+                            : openUpdateInBrowser,
+                        icon: const Icon(Icons.open_in_browser),
+                        label: const Text('APK im Browser öffnen'),
                       ),
                     ),
                   ],
