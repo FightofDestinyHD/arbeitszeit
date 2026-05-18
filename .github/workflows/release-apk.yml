@@ -78,7 +78,7 @@ jobs:
           storePassword=${{ secrets.KEYSTORE_PASSWORD }}
           keyPassword=${{ secrets.KEY_PASSWORD }}
           keyAlias=arbeitszeit
-          storeFile=app/arbeitszeit.jks
+          storeFile=arbeitszeit.jks
           EOF
 
       - name: Build APK (release)
