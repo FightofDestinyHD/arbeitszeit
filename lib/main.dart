@@ -1170,6 +1170,53 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
 
   Widget buildCalendarTab() {
     final selectedType = effectiveDayType(selectedDay);
+    final theme = Theme.of(context);
+
+    Widget buildDayCell(DateTime day, {bool selected = false, bool today = false}) {
+      final type = effectiveDayType(day);
+      final baseColor = colorForDayType(type, context);
+
+      Color backgroundColor;
+      Color textColor;
+      BoxBorder? border;
+
+      if (selected) {
+        backgroundColor = baseColor;
+        textColor = Colors.white;
+        border = Border.all(color: theme.colorScheme.onSurface.withValues(alpha: 0.15));
+      } else if (today) {
+        backgroundColor = baseColor.withValues(alpha: 0.25);
+        textColor = theme.colorScheme.onSurface;
+        border = Border.all(color: theme.colorScheme.primary, width: 1.2);
+      } else if (type == DayType.free) {
+        backgroundColor = Colors.grey.shade200;
+        textColor = theme.colorScheme.onSurface;
+      } else {
+        backgroundColor = baseColor.withValues(alpha: 0.18);
+        textColor = theme.colorScheme.onSurface;
+      }
+
+      return Center(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: backgroundColor,
+            shape: BoxShape.circle,
+            border: border,
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            '${day.day}',
+            style: TextStyle(
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              color: textColor,
+            ),
+          ),
+        ),
+      );
+    }
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -1183,6 +1230,11 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                   locale: 'de_DE',
                   firstDay: DateTime(2020, 1, 1),
                   lastDay: DateTime(2100, 12, 31),
+                  availableGestures: AvailableGestures.all,
+                  headerStyle: const HeaderStyle(
+                    formatButtonVisible: false,
+                    titleCentered: true,
+                  ),
                   calendarStyle: CalendarStyle(
                     todayDecoration: BoxDecoration(
                       color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.25),
@@ -1195,11 +1247,19 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                   ),
                   focusedDay: focusedDay,
                   selectedDayPredicate: (day) => isSameDay(day, selectedDay),
+                  enabledDayPredicate: (_) => true,
                   onDaySelected: (selected, focused) {
                     setState(() {
                       selectedDay = selected;
                       focusedDay = focused;
                     });
+                  },
+                  onDayLongPressed: (selected, focused) async {
+                    setState(() {
+                      selectedDay = selected;
+                      focusedDay = focused;
+                    });
+                    await _showShiftDialog(context, selected);
                   },
                   eventLoader: (day) {
                     final type = effectiveDayType(day);
@@ -1209,6 +1269,15 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                     return [type.name];
                   },
                   calendarBuilders: CalendarBuilders(
+                    defaultBuilder: (context, day, focusedDay) {
+                      return buildDayCell(day);
+                    },
+                    todayBuilder: (context, day, focusedDay) {
+                      return buildDayCell(day, today: true);
+                    },
+                    selectedBuilder: (context, day, focusedDay) {
+                      return buildDayCell(day, selected: true);
+                    },
                     markerBuilder: (context, day, events) {
                       if (events.isEmpty) {
                         return const SizedBox.shrink();
@@ -1228,6 +1297,8 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                     },
                   ),
                 ),
+                const SizedBox(height: 8),
+                const Text('Tippen: Tag auswählen. Lange tippen: Schicht direkt eintragen.'),
                 const SizedBox(height: 8),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
