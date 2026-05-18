@@ -56,6 +56,21 @@ jobs:
         working-directory: ${{ steps.project.outputs.dir }}
         run: flutter pub get
 
+      - name: Decode Keystore
+        shell: bash
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > ${{ steps.project.outputs.dir }}/android/app/arbeitszeit.jks
+
+      - name: Create key.properties
+        shell: bash
+        run: |
+          cat > ${{ steps.project.outputs.dir }}/android/key.properties <<EOF
+          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          keyAlias=arbeitszeit
+          storeFile=app/arbeitszeit.jks
+          EOF
+
       - name: Build APK (release)
         working-directory: ${{ steps.project.outputs.dir }}
         run: flutter build apk --release
