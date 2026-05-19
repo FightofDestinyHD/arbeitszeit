@@ -907,8 +907,29 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   }
 
   Duration actualDurationForDay(DateTime day) {
+    final plannedShift = plannedShifts[dayKey(day)];
+
     var total = sessions
         .where((session) => isSameDay(session.start, day))
+        .where((session) {
+          if (plannedShift == null) {
+            return true;
+          }
+
+          final sameStart = session.start.year == plannedShift.start.year &&
+              session.start.month == plannedShift.start.month &&
+              session.start.day == plannedShift.start.day &&
+              session.start.hour == plannedShift.start.hour &&
+              session.start.minute == plannedShift.start.minute;
+          final sameEnd = session.end.year == plannedShift.end.year &&
+              session.end.month == plannedShift.end.month &&
+              session.end.day == plannedShift.end.day &&
+              session.end.hour == plannedShift.end.hour &&
+              session.end.minute == plannedShift.end.minute;
+          final samePause = session.pausedDuration == plannedShift.pausedDuration;
+
+          return !(sameStart && sameEnd && samePause);
+        })
         .fold(Duration.zero, (sum, session) => sum + session.duration);
 
     if (activeStart != null && isSameDay(activeStart!, day)) {
