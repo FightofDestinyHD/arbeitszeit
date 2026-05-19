@@ -83,27 +83,30 @@ enum DayType {
 class AppSettings {
   const AppSettings({
     required this.monthlyTargetHours,
+    required this.dailyTargetHours,
     required this.reminderWorkForgotten,
     required this.reminderBreakForgotten,
     required this.reminderEndOfDay,
   });
 
   final double monthlyTargetHours;
+  final double dailyTargetHours;
   final bool reminderWorkForgotten;
   final bool reminderBreakForgotten;
   final bool reminderEndOfDay;
 
   AppSettings copyWith({
     double? monthlyTargetHours,
+    double? dailyTargetHours,
     bool? reminderWorkForgotten,
     bool? reminderBreakForgotten,
     bool? reminderEndOfDay,
   }) {
     return AppSettings(
       monthlyTargetHours: monthlyTargetHours ?? this.monthlyTargetHours,
+      dailyTargetHours: dailyTargetHours ?? this.dailyTargetHours,
       reminderWorkForgotten: reminderWorkForgotten ?? this.reminderWorkForgotten,
-      reminderBreakForgotten:
-          reminderBreakForgotten ?? this.reminderBreakForgotten,
+      reminderBreakForgotten: reminderBreakForgotten ?? this.reminderBreakForgotten,
       reminderEndOfDay: reminderEndOfDay ?? this.reminderEndOfDay,
     );
   }
@@ -111,6 +114,7 @@ class AppSettings {
   Map<String, dynamic> toJson() {
     return {
       'monthlyTargetHours': monthlyTargetHours,
+      'dailyTargetHours': dailyTargetHours,
       'reminderWorkForgotten': reminderWorkForgotten,
       'reminderBreakForgotten': reminderBreakForgotten,
       'reminderEndOfDay': reminderEndOfDay,
@@ -120,6 +124,7 @@ class AppSettings {
   static AppSettings fromJson(Map<String, dynamic> json) {
     return AppSettings(
       monthlyTargetHours: (json['monthlyTargetHours'] as num?)?.toDouble() ?? 160,
+      dailyTargetHours: (json['dailyTargetHours'] as num?)?.toDouble() ?? 8.0,
       reminderWorkForgotten: json['reminderWorkForgotten'] as bool? ?? true,
       reminderBreakForgotten: json['reminderBreakForgotten'] as bool? ?? false,
       reminderEndOfDay: json['reminderEndOfDay'] as bool? ?? true,
@@ -128,6 +133,7 @@ class AppSettings {
 
   static const defaults = AppSettings(
     monthlyTargetHours: 160,
+    dailyTargetHours: 8.0,
     reminderWorkForgotten: true,
     reminderBreakForgotten: false,
     reminderEndOfDay: true,
@@ -317,24 +323,31 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     }
 
     final action = uri.host.isNotEmpty ? uri.host : uri.path.replaceFirst('/', '');
-    if (action == 'pause') {
-      if (isPaused) {
-        await resumeTracking();
-      } else if (activeStart != null) {
-        await startPause();
-      } else {
-        await startTracking();
-      }
-    } else if (action == 'resume') {
-      await resumeTracking();
-    } else if (action == 'toggle') {
-      if (activeStart == null) {
-        await startTracking();
-      } else if (isPaused) {
-        await resumeTracking();
-      } else {
-        await startPause();
-      }
+    switch (action) {
+      case 'start':
+        if (activeStart == null) {
+          await startTracking();
+        }
+      case 'stop':
+        if (activeStart != null) {
+          await stopTracking();
+        }
+      case 'pause':
+        if (activeStart != null && !isPaused) {
+          await startPause();
+        }
+      case 'resume':
+        if (isPaused) {
+          await resumeTracking();
+        }
+      case 'toggle':
+        if (activeStart == null) {
+          await startTracking();
+        } else if (isPaused) {
+          await resumeTracking();
+        } else {
+          await startPause();
+        }
     }
   }
 
@@ -629,10 +642,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   }
 
   Duration targetPerWorkday(DateTime month) {
-    final monthly = monthlyTargetDuration(month);
-    final workDays = workingDaysInMonth(month);
-    final dailyMinutes = (monthly.inMinutes / workDays).round();
-    return Duration(minutes: dailyMinutes);
+    return Duration(minutes: (settings.dailyTargetHours * 60).round());
   }
 
   Duration remainingToday() {
@@ -844,15 +854,36 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   }
 
   _OverviewData buildOverviewData() {
-    final monthWorked = monthDuration(DateTime.now());
-    final monthTarget = monthlyTargetDuration(DateTime.now());
+    final now = DateTime.now();
+    final monthWorked = monthDuration(now);
+    final monthTarget = monthlyTargetDuration(now);
+
+    // Effektives Tagessoll: nur vergangene Tage + heute zählen ins Soll
+    final targetPerDay = targetPerWorkday(now);
+    final firstDay = DateTime(now.year, now.month, 1);
+    final todayNormalized = DateTime(now.year, now.month, now.day);
+    var effectiveMonthTarget = Duration.zero;
+    for (var day = firstDay;
+        !day.isAfter(todayNormalized);
+        day = day.add(const Duration(days: 1))) {
+      final normalizedDay = DateTime(day.year, day.month, day.day);
+      final effectiveType = effectiveDayType(normalizedDay);
+      final hasSession = sessions.any((s) => isSameDay(s.start, normalizedDay));
+      if (hasSession ||
+          (effectiveType != DayType.vacation &&
+              effectiveType != DayType.sick &&
+              effectiveType != DayType.free)) {
+        effectiveMonthTarget += targetPerDay;
+      }
+    }
+
     return _OverviewData(
       today: todayDuration(),
       remainingToday: remainingToday(),
       isWorking: activeStart != null,
       monthWorked: monthWorked,
       monthTarget: monthTarget,
-      monthOverUnder: monthWorked - monthTarget,
+      monthOverUnder: monthWorked - effectiveMonthTarget,
       activeSince: activeStart,
     );
   }
@@ -911,6 +942,8 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     final firstDay = DateTime(month.year, month.month, 1);
     final lastDay = DateTime(month.year, month.month + 1, 0);
     final targetPerDay = targetPerWorkday(month);
+    final today = DateTime.now();
+    final todayNormalized = DateTime(today.year, today.month, today.day);
     final weeks = <int, Duration>{};
 
     for (var day = firstDay; !day.isAfter(lastDay); day = day.add(const Duration(days: 1))) {
@@ -918,6 +951,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       final weekIndex = ((normalizedDay.day - 1) ~/ 7) + 1;
       final hasSession = sessions.any((session) => isSameDay(session.start, normalizedDay));
       final effectiveType = effectiveDayType(normalizedDay);
+      final isPast = normalizedDay.isBefore(todayNormalized);
 
       Duration dayBalance = Duration.zero;
       if (hasSession) {
@@ -925,12 +959,14 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
             .where((session) => isSameDay(session.start, normalizedDay))
             .fold(Duration.zero, (total, session) => total + session.duration);
         dayBalance = worked - targetPerDay;
-      } else if (effectiveType == DayType.vacation || effectiveType == DayType.sick) {
+      } else if (effectiveType == DayType.vacation || effectiveType == DayType.sick || effectiveType == DayType.free) {
+        // Als Frei/Urlaub/Krank markiert → kein Minus
         dayBalance = Duration.zero;
-      } else if (normalizedDay.weekday >= DateTime.monday &&
-          normalizedDay.weekday <= DateTime.friday) {
+      } else if (isPast) {
+        // Vergangener Werktag ohne Eintrag und nicht als frei markiert → Minusstunden
         dayBalance = -targetPerDay;
       }
+      // Heute und Zukunft ohne Eintrag → kein Minus
 
       weeks[weekIndex] = (weeks[weekIndex] ?? Duration.zero) + dayBalance;
     }
@@ -1229,6 +1265,53 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
 
     setState(() {
       settings = settings.copyWith(monthlyTargetHours: result);
+    });
+    await persistState();
+    await syncWidgetData();
+  }
+
+  Future<void> editDailyTargetHours() async {
+    final controller = TextEditingController(
+      text: settings.dailyTargetHours.toStringAsFixed(1),
+    );
+
+    final result = await showDialog<double>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Tägliches Sollstunden'),
+          content: TextField(
+            controller: controller,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: 'Stunden pro Tag (z.B. 8)',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Abbrechen'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final parsed = double.tryParse(controller.text.replaceAll(',', '.'));
+                if (parsed != null && parsed > 0) {
+                  Navigator.pop(context, parsed);
+                }
+              },
+              child: const Text('Speichern'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (result == null) {
+      return;
+    }
+
+    setState(() {
+      settings = settings.copyWith(dailyTargetHours: result);
     });
     await persistState();
     await syncWidgetData();
@@ -2317,6 +2400,12 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                 subtitle: Text('${settings.monthlyTargetHours.toStringAsFixed(1)} h'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: editMonthlyTargetHours,
+              ),
+              ListTile(
+                title: const Text('Tägliche Sollstunden'),
+                subtitle: Text('${settings.dailyTargetHours.toStringAsFixed(1)} h'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: editDailyTargetHours,
               ),
               SwitchListTile(
                 title: const Text('Erinnerung: Arbeitszeit vergessen?'),

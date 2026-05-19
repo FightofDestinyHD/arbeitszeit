@@ -12,17 +12,33 @@ import android.widget.RemoteViews
 import es.antonborri.home_widget.HomeWidgetProvider
 
 class ArbeitszeitWidgetProvider : HomeWidgetProvider() {
+
+    private fun actionBroadcast(context: Context, uriString: String): PendingIntent {
+        val intent = Intent(WidgetActionReceiver.ACTION_WIDGET).apply {
+            setClass(context, WidgetActionReceiver::class.java)
+            putExtra(WidgetActionReceiver.EXTRA_URI, uriString)
+            // Jede URI braucht einen eindeutigen RequestCode damit PendingIntents nicht kollidieren
+        }
+        return PendingIntent.getBroadcast(
+            context,
+            uriString.hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
     override fun onUpdate(
         context: Context,
         appWidgetManager: AppWidgetManager,
         appWidgetIds: IntArray,
         widgetData: SharedPreferences,
     ) {
-        val launchIntent = Intent(context, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
+        // Tippen auf den Widget-Hintergrund/Titel öffnet die App
+        val openAppIntent = Intent(context, MainActivity::class.java)
+        val openAppPendingIntent = PendingIntent.getActivity(
             context,
             0,
-            launchIntent,
+            openAppIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
@@ -34,54 +50,37 @@ class ArbeitszeitWidgetProvider : HomeWidgetProvider() {
             val isWorking = widgetData.getBoolean("is_working", false)
             val isPaused = widgetData.getBoolean("is_paused", false)
             val activeStartMillis = widgetData.getString("active_start_millis", null)?.toLongOrNull()
+
             val statusText = when {
                 isPaused -> "Pause läuft"
                 isWorking -> "Arbeitszeit läuft"
                 else -> "Nicht eingestempelt"
             }
 
-            // Main button: Start oder Stop
+            // Titel öffnet App
+            views.setOnClickPendingIntent(R.id.widget_root, openAppPendingIntent)
+
+            // Start/Stop Button → Broadcast (öffnet App NICHT)
             val mainAction = if (isWorking) "arbeitszeit://stop" else "arbeitszeit://start"
             val mainLabel = if (isWorking) "Stop" else "Start"
-            val mainIntent = Intent(context, MainActivity::class.java).apply {
-                action = "es.antonborri.home_widget.action.LAUNCH"
-                data = Uri.parse(mainAction)
-            }
-            val mainPendingIntent = PendingIntent.getActivity(
-                context,
-                mainAction.hashCode(),
-                mainIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
+            views.setTextViewText(R.id.widget_main_button, mainLabel)
+            views.setOnClickPendingIntent(R.id.widget_main_button, actionBroadcast(context, mainAction))
 
-            // Pause button: nur sichtbar wenn Schicht läuft
+            // Pause/Weiter Button → Broadcast (öffnet App NICHT)
             val pauseAction = if (isPaused) "arbeitszeit://resume" else "arbeitszeit://pause"
             val pauseLabel = if (isPaused) "Weiter" else "Pause"
-            val pauseIntent = Intent(context, MainActivity::class.java).apply {
-                action = "es.antonborri.home_widget.action.LAUNCH"
-                data = Uri.parse(pauseAction)
+            if (isWorking) {
+                views.setViewVisibility(R.id.widget_pause_button, View.VISIBLE)
+                views.setTextViewText(R.id.widget_pause_button, pauseLabel)
+                views.setOnClickPendingIntent(R.id.widget_pause_button, actionBroadcast(context, pauseAction))
+            } else {
+                views.setViewVisibility(R.id.widget_pause_button, View.GONE)
             }
-            val pausePendingIntent = PendingIntent.getActivity(
-                context,
-                pauseAction.hashCode(),
-                pauseIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
 
             views.setTextViewText(R.id.widget_status, statusText)
             views.setTextViewText(R.id.widget_today_value, todayDuration)
             views.setTextViewText(R.id.widget_remaining_value, remainingDuration)
             views.setTextViewText(R.id.widget_balance_value, monthBalance)
-            views.setTextViewText(R.id.widget_main_button, mainLabel)
-            views.setOnClickPendingIntent(R.id.widget_main_button, mainPendingIntent)
-            
-            if (isWorking) {
-                views.setViewVisibility(R.id.widget_pause_button, View.VISIBLE)
-                views.setTextViewText(R.id.widget_pause_button, pauseLabel)
-                views.setOnClickPendingIntent(R.id.widget_pause_button, pausePendingIntent)
-            } else {
-                views.setViewVisibility(R.id.widget_pause_button, View.GONE)
-            }
 
             if (isWorking && activeStartMillis != null) {
                 val base = SystemClock.elapsedRealtime() - (System.currentTimeMillis() - activeStartMillis)
