@@ -73,6 +73,46 @@ class WorkSession {
   }
 }
 
+class PlannedShift {
+  const PlannedShift({
+    required this.day,
+    required this.start,
+    required this.end,
+    required this.name,
+    this.pausedDuration = Duration.zero,
+  });
+
+  final DateTime day;
+  final DateTime start;
+  final DateTime end;
+  final String name;
+  final Duration pausedDuration;
+
+  Duration get duration => end.difference(start) - pausedDuration;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'day': DateTime(day.year, day.month, day.day).toIso8601String(),
+      'start': start.toIso8601String(),
+      'end': end.toIso8601String(),
+      'name': name,
+      'paused_seconds': pausedDuration.inSeconds,
+    };
+  }
+
+  static PlannedShift fromJson(Map<String, dynamic> json) {
+    return PlannedShift(
+      day: DateTime.parse(json['day'] as String),
+      start: DateTime.parse(json['start'] as String),
+      end: DateTime.parse(json['end'] as String),
+      name: (json['name'] as String? ?? '').trim(),
+      pausedDuration: Duration(
+        seconds: (json['paused_seconds'] as num?)?.toInt() ?? 0,
+      ),
+    );
+  }
+}
+
 enum DayType {
   worked,
   vacation,
@@ -359,6 +399,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       'https://github.com/$githubOwner/$githubRepo/releases/latest/download/update.json';
 
   static const String sessionsKey = 'work_sessions';
+  static const String plannedShiftsKey = 'planned_shifts';
   static const String activeStartKey = 'active_start';
   static const String pauseStartKey = 'pause_start';
   static const String currentSessionPausedKey = 'current_session_paused_seconds';
@@ -369,6 +410,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   final DateFormat dateKeyFormat = DateFormat('yyyy-MM-dd');
 
   final List<WorkSession> sessions = [];
+  final Map<String, PlannedShift> plannedShifts = {};
   final Map<String, DayType> dayTypes = {};
 
   DateTime? activeStart;
@@ -475,6 +517,14 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       restoredSessions.add(WorkSession.fromJson(map));
     }
 
+    final rawPlannedShifts = prefs.getStringList(plannedShiftsKey) ?? [];
+    final restoredPlannedShifts = <String, PlannedShift>{};
+    for (final item in rawPlannedShifts) {
+      final map = Map<String, dynamic>.from(jsonDecode(item) as Map);
+      final shift = PlannedShift.fromJson(map);
+      restoredPlannedShifts[dayKey(shift.day)] = shift;
+    }
+
     final activeStartRaw = prefs.getString(activeStartKey);
     final pauseStartRaw = prefs.getString(pauseStartKey);
     final pausedSecondsRaw = prefs.getInt(currentSessionPausedKey) ?? 0;
@@ -510,6 +560,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       sessions
         ..clear()
         ..addAll(restoredSessions);
+      plannedShifts
+        ..clear()
+        ..addAll(restoredPlannedShifts);
       activeStart =
           activeStartRaw == null ? null : DateTime.parse(activeStartRaw);
       pauseStart = null;
@@ -539,8 +592,12 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     final encodedSessions = sessions
         .map((session) => jsonEncode(session.toJson()))
         .toList();
+    final encodedPlannedShifts = plannedShifts.values
+        .map((shift) => jsonEncode(shift.toJson()))
+        .toList();
 
     await prefs.setStringList(sessionsKey, encodedSessions);
+    await prefs.setStringList(plannedShiftsKey, encodedPlannedShifts);
     await prefs.setString(settingsKey, jsonEncode(settings.toJson()));
 
     final dayTypeJson = <String, String>{};
@@ -699,40 +756,21 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   Duration todayDuration() {
     final now = DateTime.now();
     final dayStart = DateTime(now.year, now.month, now.day);
-    var total = Duration.zero;
-
-    for (final session in sessions) {
-      if (isSameDay(session.start, dayStart)) {
-        total += session.duration;
-      }
-    }
-
-    if (activeStart != null && isSameDay(activeStart!, dayStart)) {
-      total += _activeSessionNetDuration(now: DateTime.now());
-    }
-
-    return total;
+    return actualDurationForDay(dayStart);
   }
 
   Duration monthDuration(DateTime month, {DateTime? until}) {
+    final firstDay = DateTime(month.year, month.month, 1);
+    final monthLastDay = DateTime(month.year, month.month + 1, 0);
+    final endDay = until == null
+        ? monthLastDay
+        : DateTime(until.year, until.month, until.day).isBefore(monthLastDay)
+            ? DateTime(until.year, until.month, until.day)
+            : monthLastDay;
+
     var total = Duration.zero;
-    final cutoff = until == null
-        ? null
-        : DateTime(until.year, until.month, until.day, 23, 59, 59, 999);
-
-    for (final session in sessions) {
-      if (session.start.year == month.year && session.start.month == month.month) {
-        if (cutoff == null || !session.start.isAfter(cutoff)) {
-          total += session.duration;
-        }
-      }
-    }
-
-    if (activeStart != null &&
-        activeStart!.year == month.year &&
-        activeStart!.month == month.month &&
-        (cutoff == null || !activeStart!.isAfter(cutoff))) {
-      total += _activeSessionNetDuration(now: DateTime.now());
+    for (var day = firstDay; !day.isAfter(endDay); day = day.add(const Duration(days: 1))) {
+      total += actualDurationForDay(day);
     }
 
     return total;
@@ -763,10 +801,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
 
   bool countsAsTargetWorkday(DateTime day) {
     final normalizedDay = DateTime(day.year, day.month, day.day);
-    final hasSession = sessions.any((session) => isSameDay(session.start, normalizedDay));
+    final hasPlannedShift = plannedShifts.containsKey(dayKey(normalizedDay));
     final explicitType = dayTypes[dayKey(normalizedDay)];
 
-    if (hasSession) {
+    if (hasPlannedShift) {
       return true;
     }
     if (explicitType == DayType.free ||
@@ -779,6 +817,29 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
         normalizedDay.weekday <= DateTime.friday;
   }
 
+  Duration plannedDurationForDay(DateTime day) {
+    final shift = plannedShifts[dayKey(day)];
+    if (shift != null) {
+      return shift.duration;
+    }
+    if (countsAsTargetWorkday(day)) {
+      return targetPerWorkday(day);
+    }
+    return Duration.zero;
+  }
+
+  Duration actualDurationForDay(DateTime day) {
+    var total = sessions
+        .where((session) => isSameDay(session.start, day))
+        .fold(Duration.zero, (sum, session) => sum + session.duration);
+
+    if (activeStart != null && isSameDay(activeStart!, day)) {
+      total += _activeSessionNetDuration(now: DateTime.now());
+    }
+
+    return total;
+  }
+
   Duration effectiveMonthTargetDuration(DateTime month, {DateTime? until}) {
     final firstDay = DateTime(month.year, month.month, 1);
     final monthLastDay = DateTime(month.year, month.month + 1, 0);
@@ -789,17 +850,16 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
             : monthLastDay;
 
     var total = Duration.zero;
-    final targetPerDay = targetPerWorkday(month);
     for (var day = firstDay; !day.isAfter(endDay); day = day.add(const Duration(days: 1))) {
-      if (countsAsTargetWorkday(day)) {
-        total += targetPerDay;
-      }
+      total += plannedDurationForDay(day);
     }
     return total;
   }
 
   Duration remainingToday() {
-    final target = targetPerWorkday(DateTime.now());
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final target = plannedDurationForDay(today);
     final remaining = target - todayDuration();
     return remaining;
   }
@@ -927,7 +987,13 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     final pausedDuration = legalBreakDeduction(anwesenheit);
 
     setState(() {
-      sessions.insert(0, WorkSession(start: start, end: end, pausedDuration: pausedDuration));
+      plannedShifts[dayKey(day)] = PlannedShift(
+        day: DateTime(day.year, day.month, day.day),
+        start: start,
+        end: end,
+        name: template.name,
+        pausedDuration: pausedDuration,
+      );
       dayTypes[dayKey(day)] = DayType.worked;
     });
     await persistState();
@@ -1043,7 +1109,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final monthWorked = monthDuration(now, until: today);
-    final monthTarget = effectiveMonthTargetDuration(
+    final effectiveMonthTarget = effectiveMonthTargetDuration(
       now,
       until: today,
     );
@@ -1053,22 +1119,24 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       remainingToday: remainingToday(),
       isWorking: activeStart != null,
       monthWorked: monthWorked,
-      monthTarget: monthTarget,
-      monthOverUnder: monthWorked - monthTarget,
+      monthTarget: monthlyTargetDuration(now),
+      monthOverUnder: monthWorked - effectiveMonthTarget,
       activeSince: activeStart,
     );
   }
 
   _StatsData buildStatsData() {
     final now = DateTime.now();
-    final thisMonth = sessions
-        .where((s) => s.start.year == now.year && s.start.month == now.month)
-        .toList();
+    final today = DateTime(now.year, now.month, now.day);
 
     final byDay = <String, Duration>{};
-    for (final session in thisMonth) {
-      final key = dayKey(session.start);
-      byDay[key] = (byDay[key] ?? Duration.zero) + session.duration;
+    for (var day = DateTime(now.year, now.month, 1);
+        !day.isAfter(today);
+        day = day.add(const Duration(days: 1))) {
+      final worked = actualDurationForDay(day);
+      if (worked > Duration.zero) {
+        byDay[dayKey(day)] = worked;
+      }
     }
 
     Duration average = Duration.zero;
@@ -1094,9 +1162,14 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       DateTime.sunday: Duration.zero,
     };
 
-    for (final session in thisMonth) {
-      byWeekday[session.start.weekday] =
-          (byWeekday[session.start.weekday] ?? Duration.zero) + session.duration;
+    for (var day = DateTime(now.year, now.month, 1);
+        !day.isAfter(today);
+        day = day.add(const Duration(days: 1))) {
+      final worked = actualDurationForDay(day);
+      if (worked > Duration.zero) {
+        byWeekday[day.weekday] =
+            (byWeekday[day.weekday] ?? Duration.zero) + worked;
+      }
     }
 
     final monthOvertime = monthDuration(
@@ -1119,7 +1192,6 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   List<_WeeklyBalance> buildWeeklyBalances(DateTime month) {
     final firstDay = DateTime(month.year, month.month, 1);
     final lastDay = DateTime(month.year, month.month + 1, 0);
-    final targetPerDay = targetPerWorkday(month);
     final today = DateTime.now();
     final todayNormalized = DateTime(today.year, today.month, today.day);
     final weeks = <int, Duration>{};
@@ -1127,18 +1199,16 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     for (var day = firstDay; !day.isAfter(lastDay); day = day.add(const Duration(days: 1))) {
       final normalizedDay = DateTime(day.year, day.month, day.day);
       final weekIndex = ((normalizedDay.day - 1) ~/ 7) + 1;
-      final hasSession = sessions.any((session) => isSameDay(session.start, normalizedDay));
       final targetDay = countsAsTargetWorkday(normalizedDay);
       final isPast = normalizedDay.isBefore(todayNormalized);
+      final planned = plannedDurationForDay(normalizedDay);
+      final worked = actualDurationForDay(normalizedDay);
 
       Duration dayBalance = Duration.zero;
-      if (hasSession) {
-        final worked = sessions
-            .where((session) => isSameDay(session.start, normalizedDay))
-            .fold(Duration.zero, (total, session) => total + session.duration);
-        dayBalance = targetDay ? worked - targetPerDay : worked;
+      if (worked > Duration.zero) {
+        dayBalance = worked - planned;
       } else if (targetDay && isPast) {
-        dayBalance = -targetPerDay;
+        dayBalance = -planned;
       }
 
       weeks[weekIndex] = (weeks[weekIndex] ?? Duration.zero) + dayBalance;
