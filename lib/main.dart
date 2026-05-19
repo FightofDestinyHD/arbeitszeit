@@ -729,6 +729,17 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     return TimeOfDay(hour: hour, minute: minute);
   }
 
+  /// Berechnet den gesetzlichen Pausenabzug nach ArbZG §4:
+  /// Anwesenheit > 9h → 45 min, > 6h → 30 min, sonst 0
+  Duration legalBreakDeduction(Duration anwesenheit) {
+    if (anwesenheit > const Duration(hours: 9)) {
+      return const Duration(minutes: 45);
+    } else if (anwesenheit > const Duration(hours: 6)) {
+      return const Duration(minutes: 30);
+    }
+    return Duration.zero;
+  }
+
   Future<void> addShiftFromTemplate(ShiftTemplate template, DateTime day) async {
     final start = DateTime(
       day.year,
@@ -749,8 +760,11 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       end = end.add(const Duration(days: 1));
     }
 
+    final anwesenheit = end.difference(start);
+    final pausedDuration = legalBreakDeduction(anwesenheit);
+
     setState(() {
-      sessions.insert(0, WorkSession(start: start, end: end));
+      sessions.insert(0, WorkSession(start: start, end: end, pausedDuration: pausedDuration));
       dayTypes[dayKey(day)] = DayType.worked;
     });
     await persistState();
@@ -2192,7 +2206,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                       if (!end.isAfter(start)) {
                         end = end.add(const Duration(days: 1));
                       }
-                      Navigator.pop(context, WorkSession(start: start, end: end));
+                      final anwesenheit = end.difference(start);
+                      final pausedDuration = legalBreakDeduction(anwesenheit);
+                      Navigator.pop(context, WorkSession(start: start, end: end, pausedDuration: pausedDuration));
                     }
                   },
                   child: const Text('Speichern'),
