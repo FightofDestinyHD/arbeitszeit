@@ -714,17 +714,24 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     return total;
   }
 
-  Duration monthDuration(DateTime month) {
+  Duration monthDuration(DateTime month, {DateTime? until}) {
     var total = Duration.zero;
+    final cutoff = until == null
+        ? null
+        : DateTime(until.year, until.month, until.day, 23, 59, 59, 999);
+
     for (final session in sessions) {
       if (session.start.year == month.year && session.start.month == month.month) {
-        total += session.duration;
+        if (cutoff == null || !session.start.isAfter(cutoff)) {
+          total += session.duration;
+        }
       }
     }
 
     if (activeStart != null &&
         activeStart!.year == month.year &&
-        activeStart!.month == month.month) {
+        activeStart!.month == month.month &&
+        (cutoff == null || !activeStart!.isAfter(cutoff))) {
       total += _activeSessionNetDuration(now: DateTime.now());
     }
 
@@ -1034,10 +1041,11 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
 
   _OverviewData buildOverviewData() {
     final now = DateTime.now();
-    final monthWorked = monthDuration(now);
+    final today = DateTime(now.year, now.month, now.day);
+    final monthWorked = monthDuration(now, until: today);
     final monthTarget = effectiveMonthTargetDuration(
       now,
-      until: DateTime(now.year, now.month, now.day),
+      until: today,
     );
 
     return _OverviewData(
@@ -1091,7 +1099,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
           (byWeekday[session.start.weekday] ?? Duration.zero) + session.duration;
     }
 
-    final monthOvertime = monthDuration(now) -
+    final monthOvertime = monthDuration(
+          now,
+          until: DateTime(now.year, now.month, now.day),
+        ) -
         effectiveMonthTargetDuration(
           now,
           until: DateTime(now.year, now.month, now.day),
@@ -1698,7 +1709,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
           throw Exception('Download fehlgeschlagen (${response.statusCode}).');
         }
 
-        final dir = await getApplicationDocumentsDirectory();
+        final dir = await getTemporaryDirectory();
         final apkFile = File(
           '${dir.path}/arbeitszeit_${manifest.version.replaceAll('.', '_')}.apk',
         );
