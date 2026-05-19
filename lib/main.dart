@@ -579,6 +579,21 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
           migratedLegacyPlannedSessions = true;
           continue;
         }
+
+        final sessionLooksPlanned = session.pausedDuration == legalBreakDeduction(
+          session.end.difference(session.start),
+        );
+        if (sessionLooksPlanned) {
+          restoredPlannedShifts[dayKey(sessionDay)] = PlannedShift(
+            day: sessionDay,
+            start: session.start,
+            end: session.end,
+            name: 'Geplante Schicht',
+            pausedDuration: session.pausedDuration,
+          );
+          migratedLegacyPlannedSessions = true;
+          continue;
+        }
       }
       migratedSessions.add(session);
     }
@@ -928,7 +943,17 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
               session.end.minute == plannedShift.end.minute;
           final samePause = session.pausedDuration == plannedShift.pausedDuration;
 
-          return !(sameStart && sameEnd && samePause);
+          if (sameStart && sameEnd && samePause) {
+            return false;
+          }
+
+          final looksLikeSamePlannedDuration = session.duration == plannedShift.duration;
+          final startsSameDay = isSameDay(session.start, plannedShift.day);
+          if (startsSameDay && looksLikeSamePlannedDuration && session.start.hour == plannedShift.start.hour) {
+            return false;
+          }
+
+          return true;
         })
         .fold(Duration.zero, (sum, session) => sum + session.duration);
 
