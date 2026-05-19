@@ -1,45 +1,30 @@
 # Arbeitszeit
 
-Cross-platform Arbeitszeiterfassungs-App mit Flutter (Android + iOS) und vorbereiteter Widget-Anbindung.
+Cross-plattform Arbeitszeiterfassungs-App für Android und iOS. Einfaches und intuitives Tracking von täglichen Arbeitszeiten mit offline-Unterstützung und Überstunden-Anzeige.
 
-## Setup
+## Funktionen
 
-1. Flutter installieren (im aktuellen Setup wurde Puro verwendet):
-	- `winget install --id pingbird.Puro -e`
-	- `puro flutter install stable`
-2. Abhaengigkeiten installieren:
-	- `puro flutter pub get`
-3. App starten:
-	- `puro flutter run`
+### Zeittracking
+- **Start/Stop-Tracking**: Arbeitszeiten erfassen und stoppen
+- **Pausenverwaltung**: Pausen starten und automatische Pausenempfehlungen nach 6 Stunden
+- **Tagessumme**: Tägliche Arbeitszeit mit Restzeit bis zum Tagesziel
+- **Monatssaldo**: Überstunden und Minusstunden auf Monatsebene
 
-## Aktueller Stand
+### Kalender
+- **Monatsansicht**: Übersichtliche dunkle Kalenderdarstellung mit Wochenzahlen
+- **Tagestypen**: Markierung von Urlaubstagen, Krankheitstagen und freien Tagen
+- **Schnelle Navigation**: Tippen zum Auswaehlen, langen Tippen zum Eintragen einer Schicht
 
-- Start/Stop fuer Arbeitszeit-Tracking
-- Tagessumme in Stunden:Minuten
-- Lokale Persistenz mit `shared_preferences`
-- Grundgeruest fuer Home-Screen-Widget-Sync ueber `home_widget`
+### Widgets & Export
+- **Android Home-Widget**: Live-Widget mit aktuellem Status, Restzeit und Schaltern direkt vom Homescreen
+- **CSV-Export**: Monatsbericht als CSV-Datei für externe Verarbeitung
 
-## Widget (naechster Schritt)
+### Erweiterte Funktionen
+- **Automatische Updates**: Prüfung auf neue App-Versionen und einfache Installation
+- **Offline-First**: Alle Daten werden lokal gespeichert, keine Cloud-Abhängigkeit
+- **Schichtvorlagen**: Vordefinierte Start-/Endzeiten für schnelle Eingabe
 
-Native Widget-Targets muessen noch erstellt werden:
-
-- Android: AppWidgetProvider + Layout + Manifest-Eintrag
-- iOS: Widget Extension (WidgetKit)
-
-Die Flutter-Seite ist bereits vorbereitet und schreibt `today_duration` via `home_widget`.
-
-A new Flutter project.
-
-## Getting Started
-
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+### Statistiken
+- **Wöchentliche Balance**: Visualisierung der Wochenbalance
+- **Durchschnittswerte**: Durchschnittliche und längste Arbeitstage im Monat
+- **Verlauf**: Übersicht aller erfassten Schichten
