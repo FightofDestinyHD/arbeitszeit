@@ -373,14 +373,25 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       }
     }
 
+    // Wenn Pause aktiv war und App neu gestartet, Pausenzeit finalisieren
+    // Aber max 4 Stunden, um nicht versehentlich über Nacht zu pausieren
+    var restoredPausedSeconds = pausedSecondsRaw;
+    if (pauseStartRaw != null && activeStartRaw != null) {
+      final pauseStartDate = DateTime.parse(pauseStartRaw);
+      final pauseDuration = DateTime.now().difference(pauseStartDate);
+      if (pauseDuration.inSeconds > 0 && pauseDuration.inSeconds <= 4 * 3600) {
+        restoredPausedSeconds += pauseDuration.inSeconds;
+      }
+    }
+
     setState(() {
       sessions
         ..clear()
         ..addAll(restoredSessions);
       activeStart =
           activeStartRaw == null ? null : DateTime.parse(activeStartRaw);
-      pauseStart = pauseStartRaw == null ? null : DateTime.parse(pauseStartRaw);
-      currentSessionPaused = Duration(seconds: pausedSecondsRaw);
+      pauseStart = null;
+      currentSessionPaused = Duration(seconds: restoredPausedSeconds);
       autoBreakPromptShown = false;
       settings = restoredSettings;
       dayTypes
