@@ -291,32 +291,9 @@ Future<void> backgroundCallback(Uri? uri) async {
     } catch (_) {}
   }
 
-  if (todayTarget == Duration.zero) {
-    final dayTypesRaw = prefs.getString('day_types');
-    String? explicitType;
-    if (dayTypesRaw != null) {
-      try {
-        final dayTypes = Map<String, dynamic>.from(jsonDecode(dayTypesRaw) as Map);
-        explicitType = dayTypes[todayKey] as String?;
-      } catch (_) {}
-    }
-    if (explicitType != 'free' && explicitType != 'vacation' && explicitType != 'sick') {
-      final settingsRaw = prefs.getString('app_settings');
-      double dailyTargetHours = 8.0;
-      if (settingsRaw != null) {
-        try {
-          final settings = Map<String, dynamic>.from(jsonDecode(settingsRaw) as Map);
-          dailyTargetHours = (settings['dailyTargetHours'] as num?)?.toDouble() ?? 8.0;
-        } catch (_) {}
-      }
-      if (todayDate.weekday >= DateTime.monday && todayDate.weekday <= DateTime.friday) {
-        todayTarget = Duration(minutes: (dailyTargetHours * 60).round());
-      }
-    }
-  }
-
-  final todayBalance = today - todayTarget;
-  final remainingToday = todayTarget - today;
+  final hasTodayPlan = todayTarget > Duration.zero;
+  final todayBalance = hasTodayPlan ? today - todayTarget : Duration.zero;
+  final remainingToday = hasTodayPlan ? todayTarget - today : Duration.zero;
 
   String _fmtDur(Duration d) {
     final neg = d.isNegative;
@@ -876,9 +853,6 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     if (shift != null) {
       return shift.duration;
     }
-    if (countsAsTargetWorkday(day)) {
-      return targetPerWorkday(day);
-    }
     return Duration.zero;
   }
 
@@ -1164,22 +1138,20 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     final today = DateTime(now.year, now.month, now.day);
     final todayWorked = todayDuration();
     final todayTarget = plannedDurationForDay(today);
-    final todayBalance = todayWorked - todayTarget;
+    final hasTodayPlan = todayTarget > Duration.zero;
+    final todayBalance = hasTodayPlan ? todayWorked - todayTarget : Duration.zero;
     final monthWorked = monthDuration(now, until: today);
-    final effectiveMonthTarget = effectiveMonthTargetDuration(
-      now,
-      until: today,
-    );
+    final monthTarget = monthlyTargetDuration(now);
 
     return _OverviewData(
       today: todayWorked,
       todayTarget: todayTarget,
       todayBalance: todayBalance,
-      remainingToday: todayTarget - todayWorked,
+      remainingToday: hasTodayPlan ? todayTarget - todayWorked : Duration.zero,
       isWorking: activeStart != null,
       monthWorked: monthWorked,
-      monthTarget: monthlyTargetDuration(now),
-      monthOverUnder: monthWorked - effectiveMonthTarget,
+      monthTarget: monthTarget,
+      monthOverUnder: monthWorked - monthTarget,
       activeSince: activeStart,
     );
   }
@@ -1235,10 +1207,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
           now,
           until: DateTime(now.year, now.month, now.day),
         ) -
-        effectiveMonthTargetDuration(
-          now,
-          until: DateTime(now.year, now.month, now.day),
-        );
+        monthlyTargetDuration(now);
 
     return _StatsData(
       averageWorkDay: average,
