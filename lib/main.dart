@@ -26,8 +26,8 @@ class ShiftTemplate {
 
   Map<String, dynamic> toJson() => {
         'name': name,
-        'start': '${start.hour}:${start.minute}',
-        'end': '${end.hour}:${end.minute}',
+      'start': '${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')}',
+      'end': '${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}',
       };
 
   static ShiftTemplate fromJson(Map<String, dynamic> json) {
@@ -42,17 +42,23 @@ class ShiftTemplate {
 }
 
 class WorkSession {
-  const WorkSession({required this.start, required this.end});
+  const WorkSession({
+    required this.start,
+    required this.end,
+    this.pausedDuration = Duration.zero,
+  });
 
   final DateTime start;
   final DateTime end;
+  final Duration pausedDuration;
 
-  Duration get duration => end.difference(start);
+  Duration get duration => end.difference(start) - pausedDuration;
 
   Map<String, dynamic> toJson() {
     return {
       'start': start.toIso8601String(),
       'end': end.toIso8601String(),
+      'paused_seconds': pausedDuration.inSeconds,
     };
   }
 
@@ -60,6 +66,9 @@ class WorkSession {
     return WorkSession(
       start: DateTime.parse(json['start'] as String),
       end: DateTime.parse(json['end'] as String),
+      pausedDuration: Duration(
+        seconds: (json['paused_seconds'] as num?)?.toInt() ?? 0,
+      ),
     );
   }
 }
@@ -238,6 +247,8 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
 
   static const String sessionsKey = 'work_sessions';
   static const String activeStartKey = 'active_start';
+  static const String pauseStartKey = 'pause_start';
+  static const String currentSessionPausedKey = 'current_session_paused_seconds';
   static const String settingsKey = 'app_settings';
   static const String dayTypesKey = 'day_types';
 
@@ -248,6 +259,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   final Map<String, DayType> dayTypes = {};
 
   DateTime? activeStart;
+  DateTime? pauseStart;
+  Duration currentSessionPaused = Duration.zero;
+  bool autoBreakPromptShown = false;
   AppSettings settings = AppSettings.defaults;
   bool loading = true;
   int currentTab = 0;
@@ -259,14 +273,18 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   String? updateMessage;
   UpdateManifest? availableUpdate;
   String? updateSource; // 'GitHub' or 'Fallback'
+  StreamSubscription<Uri?>? widgetClickSubscription;
+  Uri? pendingWidgetUri;
 
   @override
   void initState() {
     super.initState();
+    _setupWidgetClickHandling();
     restoreState();
     uiTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted) {
         setState(() {});
+        _maybeShowAutoBreakPrompt();
       }
     });
   }
@@ -274,7 +292,50 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   @override
   void dispose() {
     uiTimer?.cancel();
+    widgetClickSubscription?.cancel();
     super.dispose();
+  }
+
+  void _setupWidgetClickHandling() {
+    widgetClickSubscription = HomeWidget.widgetClicked.listen((uri) {
+      if (uri != null) {
+        _handleWidgetAction(uri);
+      }
+    });
+
+    HomeWidget.initiallyLaunchedFromHomeWidget().then((uri) {
+      if (uri != null) {
+        _handleWidgetAction(uri);
+      }
+    });
+  }
+
+  Future<void> _handleWidgetAction(Uri uri) async {
+    if (loading) {
+      pendingWidgetUri = uri;
+      return;
+    }
+
+    final action = uri.host.isNotEmpty ? uri.host : uri.path.replaceFirst('/', '');
+    if (action == 'pause') {
+      if (isPaused) {
+        await resumeTracking();
+      } else if (activeStart != null) {
+        await startPause();
+      } else {
+        await startTracking();
+      }
+    } else if (action == 'resume') {
+      await resumeTracking();
+    } else if (action == 'toggle') {
+      if (activeStart == null) {
+        await startTracking();
+      } else if (isPaused) {
+        await resumeTracking();
+      } else {
+        await startPause();
+      }
+    }
   }
 
   Future<void> restoreState() async {
@@ -293,6 +354,8 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     }
 
     final activeStartRaw = prefs.getString(activeStartKey);
+    final pauseStartRaw = prefs.getString(pauseStartKey);
+    final pausedSecondsRaw = prefs.getInt(currentSessionPausedKey) ?? 0;
     final settingsRaw = prefs.getString(settingsKey);
     final dayTypesRaw = prefs.getString(dayTypesKey);
 
@@ -316,6 +379,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
         ..addAll(restoredSessions);
       activeStart =
           activeStartRaw == null ? null : DateTime.parse(activeStartRaw);
+      pauseStart = pauseStartRaw == null ? null : DateTime.parse(pauseStartRaw);
+      currentSessionPaused = Duration(seconds: pausedSecondsRaw);
+      autoBreakPromptShown = false;
       settings = restoredSettings;
       dayTypes
         ..clear()
@@ -324,6 +390,12 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     });
 
     await syncWidgetData();
+
+    final queuedUri = pendingWidgetUri;
+    if (queuedUri != null) {
+      pendingWidgetUri = null;
+      await _handleWidgetAction(queuedUri);
+    }
   }
 
   Future<void> persistState() async {
@@ -346,14 +418,120 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
 
     if (activeStart == null) {
       await prefs.remove(activeStartKey);
+      await prefs.remove(pauseStartKey);
+      await prefs.remove(currentSessionPausedKey);
     } else {
       await prefs.setString(activeStartKey, activeStart!.toIso8601String());
+      if (pauseStart == null) {
+        await prefs.remove(pauseStartKey);
+      } else {
+        await prefs.setString(pauseStartKey, pauseStart!.toIso8601String());
+      }
+      await prefs.setInt(currentSessionPausedKey, currentSessionPaused.inSeconds);
     }
   }
 
   Future<void> startTracking() async {
     setState(() {
       activeStart = DateTime.now();
+      pauseStart = null;
+      currentSessionPaused = Duration.zero;
+      autoBreakPromptShown = false;
+    });
+    await persistState();
+    await syncWidgetData();
+  }
+
+  bool get isPaused => activeStart != null && pauseStart != null;
+
+  Duration _activeSessionNetDuration({DateTime? now}) {
+    final started = activeStart;
+    if (started == null) {
+      return Duration.zero;
+    }
+
+    final currentNow = now ?? DateTime.now();
+    final activeSpan = currentNow.difference(started);
+    final ongoingPause = pauseStart == null ? Duration.zero : currentNow.difference(pauseStart!);
+    return activeSpan - currentSessionPaused - ongoingPause;
+  }
+
+  Future<void> startPause() async {
+    if (activeStart == null || pauseStart != null) {
+      return;
+    }
+
+    setState(() {
+      pauseStart = DateTime.now();
+    });
+    await persistState();
+    await syncWidgetData();
+  }
+
+  Future<void> startSuggestedBreak() async {
+    if (activeStart == null) {
+      return;
+    }
+
+    if (pauseStart == null) {
+      await startPause();
+    }
+  }
+
+  void _maybeShowAutoBreakPrompt() {
+    if (!mounted || loading) {
+      return;
+    }
+    if (autoBreakPromptShown || !settings.reminderBreakForgotten) {
+      return;
+    }
+    if (activeStart == null || pauseStart != null) {
+      return;
+    }
+
+    final worked = _activeSessionNetDuration(now: DateTime.now());
+    if (worked < const Duration(hours: 6)) {
+      return;
+    }
+
+    autoBreakPromptShown = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      showDialog<void>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('Pause nicht vergessen?'),
+            content: const Text('Du hast jetzt 6 Stunden erreicht. Soll eine Pause gestartet werden?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Später'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  Navigator.pop(dialogContext);
+                  await startSuggestedBreak();
+                },
+                child: const Text('30 Minuten Pause starten'),
+              ),
+            ],
+          );
+        },
+      );
+    });
+  }
+
+  Future<void> resumeTracking() async {
+    if (activeStart == null || pauseStart == null) {
+      return;
+    }
+
+    setState(() {
+      currentSessionPaused += DateTime.now().difference(pauseStart!);
+      pauseStart = null;
     });
     await persistState();
     await syncWidgetData();
@@ -365,9 +543,20 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     }
 
     final end = DateTime.now();
+    final pausedDuration = currentSessionPaused + (pauseStart == null ? Duration.zero : end.difference(pauseStart!));
     setState(() {
-      sessions.insert(0, WorkSession(start: activeStart!, end: end));
+      sessions.insert(
+        0,
+        WorkSession(
+          start: activeStart!,
+          end: end,
+          pausedDuration: pausedDuration,
+        ),
+      );
       activeStart = null;
+      pauseStart = null;
+      currentSessionPaused = Duration.zero;
+      autoBreakPromptShown = false;
     });
 
     await persistState();
@@ -386,7 +575,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     }
 
     if (activeStart != null && isSameDay(activeStart!, dayStart)) {
-      total += DateTime.now().difference(activeStart!);
+      total += _activeSessionNetDuration(now: DateTime.now());
     }
 
     return total;
@@ -403,7 +592,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     if (activeStart != null &&
         activeStart!.year == month.year &&
         activeStart!.month == month.month) {
-      total += DateTime.now().difference(activeStart!);
+      total += _activeSessionNetDuration(now: DateTime.now());
     }
 
     return total;
@@ -450,7 +639,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     final absDuration = negative ? duration.abs() : duration;
     final hours = absDuration.inHours;
     final minutes = absDuration.inMinutes.remainder(60);
-    final base = '${hours}h ${minutes}m';
+    final base = '${hours}h ${minutes.toString().padLeft(2, '0')}m';
     return negative ? '-$base' : base;
   }
 
@@ -835,6 +1024,30 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     );
   }
 
+  int isoWeekNumber(DateTime date) {
+    final mondayBasedWeekday = date.weekday == DateTime.sunday ? 7 : date.weekday;
+    final thursday = date.add(Duration(days: 4 - mondayBasedWeekday));
+    final firstThursday = DateTime(thursday.year, 1, 4);
+    final firstMondayBasedWeekday = firstThursday.weekday == DateTime.sunday
+        ? 7
+        : firstThursday.weekday;
+    final firstWeekThursday = firstThursday
+        .add(Duration(days: 4 - firstMondayBasedWeekday));
+    return 1 + thursday.difference(firstWeekThursday).inDays ~/ 7;
+  }
+
+  List<int> weekNumbersForMonth(DateTime month) {
+    final firstDay = DateTime(month.year, month.month, 1);
+    final startOfGrid = firstDay.subtract(
+      Duration(days: firstDay.weekday == DateTime.sunday ? 6 : firstDay.weekday - DateTime.monday),
+    );
+
+    return List<int>.generate(
+      6,
+      (index) => isoWeekNumber(startOfGrid.add(Duration(days: index * 7))),
+    );
+  }
+
   Future<void> syncWidgetData() async {
     final overview = buildOverviewData();
     await HomeWidget.saveWidgetData<String>(
@@ -847,7 +1060,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     );
     await HomeWidget.saveWidgetData<String>(
       'status_text',
-      overview.isWorking ? 'eingestempelt' : 'ausgestempelt',
+      overview.isWorking
+          ? (isPaused ? 'Pause läuft' : 'eingestempelt')
+          : 'ausgestempelt',
     );
     await HomeWidget.saveWidgetData<String>(
       'month_balance',
@@ -856,6 +1071,16 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     await HomeWidget.saveWidgetData<bool>(
       'is_working',
       overview.isWorking,
+    );
+    await HomeWidget.saveWidgetData<bool>(
+      'is_paused',
+      isPaused,
+    );
+    await HomeWidget.saveWidgetData<String>(
+      'action_label',
+      activeStart == null
+          ? 'Start'
+          : (isPaused ? 'Pause beenden' : 'Pause starten'),
     );
     await HomeWidget.saveWidgetData<String?>(
       'active_start_millis',
@@ -880,8 +1105,8 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     for (final session in sessions) {
       if (session.start.year == month.year && session.start.month == month.month) {
         final day = DateFormat('yyyy-MM-dd').format(session.start);
-        final start = timeFormat.format(session.start);
-        final end = timeFormat.format(session.end);
+        final start = formatTimeOfDay(TimeOfDay.fromDateTime(session.start));
+        final end = formatTimeOfDay(TimeOfDay.fromDateTime(session.end));
         buffer.writeln('$day,$start,$end,${session.duration.inMinutes}');
       }
     }
@@ -1327,6 +1552,20 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: data.isWorking
+                          ? OutlinedButton.icon(
+                              onPressed: isPaused ? resumeTracking : startPause,
+                              icon: Icon(isPaused ? Icons.play_arrow : Icons.free_breakfast),
+                              label: Text(isPaused ? 'Pause beenden' : 'Pause starten'),
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -1473,6 +1712,8 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   Widget buildCalendarTab() {
     final selectedType = effectiveDayType(selectedDay);
     final theme = Theme.of(context);
+    final monthLabel = DateFormat('MMMM yyyy', 'de_DE').format(focusedDay);
+    final weekNumbers = weekNumbersForMonth(focusedDay);
 
     Widget buildDayCell(DateTime day, {bool selected = false, bool today = false}) {
       final type = effectiveDayType(day);
@@ -1484,41 +1725,40 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       BoxBorder? border;
 
       if (selected) {
-        backgroundColor = theme.colorScheme.primary;
+        backgroundColor = const Color(0xFF2F80ED);
         textColor = Colors.white;
-        border = Border.all(color: theme.colorScheme.primary, width: 1.5);
+        border = Border.all(color: const Color(0xFF5AA7FF), width: 1.2);
       } else if (today) {
-        backgroundColor = theme.colorScheme.secondary.withValues(alpha: 0.28);
-        textColor = theme.colorScheme.onSurface;
-        border = Border.all(color: theme.colorScheme.secondary, width: 1.4);
+        backgroundColor = const Color(0xFF262A30);
+        textColor = Colors.white;
+        border = Border.all(color: const Color(0xFF2F80ED), width: 1.2);
       } else if (type == DayType.free) {
-        backgroundColor = isWeekend
-            ? Colors.amber.shade100
-            : Colors.lightBlue.shade50;
-        textColor = theme.colorScheme.onSurface;
-        border = Border.all(color: Colors.blueGrey.shade100);
+        backgroundColor = const Color(0xFF1F2227);
+        textColor = isWeekend ? const Color(0xFFFF5A5F) : Colors.white.withValues(alpha: 0.88);
+        border = Border.all(color: const Color(0xFF2A2F36));
       } else {
-        backgroundColor = baseColor.withValues(alpha: 0.18);
-        textColor = theme.colorScheme.onSurface;
-        border = Border.all(color: baseColor.withValues(alpha: 0.45));
+        backgroundColor = baseColor.withValues(alpha: 0.12);
+        textColor = isWeekend ? const Color(0xFFFF5A5F) : Colors.white;
+        border = Border.all(color: baseColor.withValues(alpha: 0.35));
       }
 
       return Center(
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
-          width: 36,
-          height: 36,
+          width: 32,
+          height: 24,
           decoration: BoxDecoration(
             color: backgroundColor,
-            shape: BoxShape.circle,
+            borderRadius: BorderRadius.circular(999),
             border: border,
           ),
           alignment: Alignment.center,
           child: Text(
             '${day.day}',
             style: TextStyle(
-              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              fontWeight: selected || today ? FontWeight.w700 : FontWeight.w500,
               color: textColor,
+              fontSize: 12,
             ),
           ),
         ),
@@ -1528,103 +1768,238 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(8),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFF191C22),
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: const Color(0xFF2A2F36)),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black26,
+                blurRadius: 18,
+                offset: Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Theme(
+            data: Theme.of(context).copyWith(
+              colorScheme: Theme.of(context).colorScheme.copyWith(
+                surface: const Color(0xFF191C22),
+                primary: const Color(0xFF2F80ED),
+                onSurface: Colors.white,
+              ),
+              textTheme: Theme.of(context).textTheme.apply(
+                bodyColor: Colors.white,
+                displayColor: Colors.white,
+              ),
+            ),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                TableCalendar<dynamic>(
-                  locale: 'de_DE',
-                  firstDay: DateTime(2020, 1, 1),
-                  lastDay: DateTime(2100, 12, 31),
-                  availableGestures: AvailableGestures.all,
-                  headerStyle: const HeaderStyle(
-                    formatButtonVisible: false,
-                    titleCentered: true,
-                  ),
-                  calendarStyle: CalendarStyle(
-                    todayDecoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.25),
-                      shape: BoxShape.circle,
-                    ),
-                    selectedDecoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primary,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  focusedDay: focusedDay,
-                  selectedDayPredicate: (day) => isSameDay(day, selectedDay),
-                  enabledDayPredicate: (_) => true,
-                  onDaySelected: (selected, focused) {
-                    setState(() {
-                      selectedDay = selected;
-                      focusedDay = focused;
-                    });
-                  },
-                  onDayLongPressed: (selected, focused) async {
-                    setState(() {
-                      selectedDay = selected;
-                      focusedDay = focused;
-                    });
-                    await _showShiftDialog(context, selected);
-                  },
-                  eventLoader: (day) {
-                    final type = effectiveDayType(day);
-                    if (type == DayType.free) {
-                      return const [];
-                    }
-                    return [type.name];
-                  },
-                  calendarBuilders: CalendarBuilders(
-                    defaultBuilder: (context, day, focusedDay) {
-                      return buildDayCell(day);
-                    },
-                    todayBuilder: (context, day, focusedDay) {
-                      return buildDayCell(day, today: true);
-                    },
-                    selectedBuilder: (context, day, focusedDay) {
-                      return buildDayCell(day, selected: true);
-                    },
-                    markerBuilder: (context, day, events) {
-                      if (events.isEmpty) {
-                        return const SizedBox.shrink();
-                      }
-                      final type = effectiveDayType(day);
-                      return Align(
-                        alignment: Alignment.bottomCenter,
-                        child: Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            color: colorForDayType(type, context),
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const Text('Tippen: Tag auswählen. Lange tippen: Schicht direkt eintragen.'),
-                const SizedBox(height: 8),
                 Row(
                   children: [
                     Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            monthLabel,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 22,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Tippen zum Auswaehlen, lang tippen fuer Schicht',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.68),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF262A30),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: const Color(0xFF2F80ED)),
+                      ),
                       child: Text(
-                        'Ausgewählt: ${DateFormat('dd.MM.yyyy').format(selectedDay)}',
-                        style: theme.textTheme.titleSmall,
+                        DateFormat('dd.MM', 'de_DE').format(selectedDay),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 14),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: 28,
+                      child: Column(
+                        children: [
+                          const SizedBox(height: 28),
+                          const SizedBox(height: 28),
+                          ...weekNumbers.map(
+                            (week) => SizedBox(
+                              height: 52,
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  '$week',
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.45),
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: TableCalendar<dynamic>(
+                        locale: 'de_DE',
+                        firstDay: DateTime(2020, 1, 1),
+                        lastDay: DateTime(2100, 12, 31),
+                        focusedDay: focusedDay,
+                        selectedDayPredicate: (day) => isSameDay(day, selectedDay),
+                        availableGestures: AvailableGestures.horizontalSwipe,
+                        calendarFormat: CalendarFormat.month,
+                        sixWeekMonthsEnforced: true,
+                        shouldFillViewport: true,
+                        rowHeight: 52,
+                        daysOfWeekHeight: 28,
+                        headerVisible: false,
+                        availableCalendarFormats: const {CalendarFormat.month: 'Monat'},
+                        onDaySelected: (selected, focused) {
+                          setState(() {
+                            selectedDay = selected;
+                            focusedDay = focused;
+                          });
+                        },
+                        onDayLongPressed: (selected, focused) async {
+                          setState(() {
+                            selectedDay = selected;
+                            focusedDay = focused;
+                          });
+                          await _showShiftDialog(context, selected);
+                        },
+                        onPageChanged: (focused) {
+                          setState(() {
+                            focusedDay = focused;
+                          });
+                        },
+                        daysOfWeekStyle: DaysOfWeekStyle(
+                          weekdayStyle: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.7),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          weekendStyle: const TextStyle(
+                            color: Color(0xFFFF5A5F),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        calendarStyle: CalendarStyle(
+                          outsideDaysVisible: true,
+                          todayDecoration: BoxDecoration(
+                            color: const Color(0xFF262A30),
+                            border: Border.all(color: const Color(0xFF2F80ED), width: 1.2),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          selectedDecoration: BoxDecoration(
+                            color: const Color(0xFF2F80ED),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          defaultTextStyle: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          weekendTextStyle: const TextStyle(
+                            color: Color(0xFFFF5A5F),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          outsideTextStyle: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.28),
+                            fontSize: 12,
+                          ),
+                          todayTextStyle: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          selectedTextStyle: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          cellMargin: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                        ),
+                        calendarBuilders: CalendarBuilders(
+                          defaultBuilder: (context, day, focusedDay) {
+                            return buildDayCell(day);
+                          },
+                          todayBuilder: (context, day, focusedDay) {
+                            return buildDayCell(day, today: true);
+                          },
+                          selectedBuilder: (context, day, focusedDay) {
+                            return buildDayCell(day, selected: true);
+                          },
+                          outsideBuilder: (context, day, focusedDay) {
+                            return buildDayCell(day);
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
                 Row(
                   children: [
                     Expanded(
-                      child: FilledButton.icon(
+                      child: FilledButton.tonalIcon(
                         onPressed: () => _showShiftDialog(context, selectedDay),
                         icon: const Icon(Icons.add),
-                        label: const Text('Schicht für Tag eintragen'),
+                        label: const Text('Schicht'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: FilledButton.tonalIcon(
+                        onPressed: () {
+                          if (isPaused) {
+                            resumeTracking();
+                          } else {
+                            startPause();
+                          }
+                        },
+                        icon: Icon(isPaused ? Icons.play_arrow : Icons.free_breakfast),
+                        label: Text(isPaused ? 'Weiter' : 'Pause'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: FilledButton.tonalIcon(
+                        onPressed: () => setState(() {
+                          selectedDay = DateTime.now();
+                          focusedDay = DateTime.now();
+                        }),
+                        icon: const Icon(Icons.today),
+                        label: const Text('Heute'),
                       ),
                     ),
                   ],
