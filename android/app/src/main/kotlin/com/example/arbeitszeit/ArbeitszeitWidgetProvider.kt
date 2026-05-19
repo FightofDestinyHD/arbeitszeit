@@ -30,6 +30,7 @@ class ArbeitszeitWidgetProvider : HomeWidgetProvider() {
             val todayDuration = widgetData.getString("today_duration", "0h 0m") ?: "0h 0m"
             val remainingDuration = widgetData.getString("remaining_duration", "0h 0m") ?: "0h 0m"
             val monthBalance = widgetData.getString("month_balance", "0h 0m") ?: "0h 0m"
+            val todayBalance = widgetData.getString("today_balance", "0h 0m") ?: "0h 0m"
             val isWorking = widgetData.getBoolean("is_working", false)
             val isPaused = widgetData.getBoolean("is_paused", false)
             val activeStartMillis = widgetData.getString("active_start_millis", null)?.toLongOrNull()
@@ -70,6 +71,7 @@ class ArbeitszeitWidgetProvider : HomeWidgetProvider() {
             views.setTextViewText(R.id.widget_status, statusText)
             views.setTextViewText(R.id.widget_today_value, todayDuration)
             views.setTextViewText(R.id.widget_remaining_value, remainingDuration)
+            views.setTextViewText(R.id.widget_today_balance_value, todayBalance)
             views.setTextViewText(R.id.widget_balance_value, monthBalance)
 
             if (isWorking && activeStartMillis != null) {

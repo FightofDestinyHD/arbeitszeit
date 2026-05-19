@@ -246,17 +246,21 @@ Future<void> backgroundCallback(Uri? uri) async {
   final isWorking = newActiveRaw != null;
   final isPausedNow = newActiveRaw != null && newPauseRaw != null;
 
+  final todayDate = DateTime(now.year, now.month, now.day);
+  final todayKey = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+
   Duration today = Duration.zero;
   if (newActiveRaw != null) {
     final started = DateTime.parse(newActiveRaw);
-    final span = now.difference(started);
-    final ongoingPause = newPauseRaw != null ? now.difference(DateTime.parse(newPauseRaw)) : Duration.zero;
-    today = span - Duration(seconds: newPaused) - ongoingPause;
+    if (started.year == todayDate.year && started.month == todayDate.month && started.day == todayDate.day) {
+      final span = now.difference(started);
+      final ongoingPause = newPauseRaw != null ? now.difference(DateTime.parse(newPauseRaw)) : Duration.zero;
+      today = span - Duration(seconds: newPaused) - ongoingPause;
+    }
   }
 
   // Alle heutigen abgeschlossenen Sessions addieren
   final rawSessions = prefs.getStringList('work_sessions') ?? [];
-  final todayKey = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
   for (final s in rawSessions) {
     try {
       final m = Map<String, dynamic>.from(jsonDecode(s) as Map);
@@ -270,6 +274,50 @@ Future<void> backgroundCallback(Uri? uri) async {
     } catch (_) {}
   }
 
+  Duration todayTarget = Duration.zero;
+  final rawPlannedShifts = prefs.getStringList('planned_shifts') ?? [];
+  for (final item in rawPlannedShifts) {
+    try {
+      final map = Map<String, dynamic>.from(jsonDecode(item) as Map);
+      final day = DateTime.parse(map['day'] as String);
+      final planKey = '${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}';
+      if (planKey == todayKey) {
+        final start = DateTime.parse(map['start'] as String);
+        final end = DateTime.parse(map['end'] as String);
+        final pausedSec = (map['paused_seconds'] as num?)?.toInt() ?? 0;
+        todayTarget = end.difference(start) - Duration(seconds: pausedSec);
+        break;
+      }
+    } catch (_) {}
+  }
+
+  if (todayTarget == Duration.zero) {
+    final dayTypesRaw = prefs.getString('day_types');
+    String? explicitType;
+    if (dayTypesRaw != null) {
+      try {
+        final dayTypes = Map<String, dynamic>.from(jsonDecode(dayTypesRaw) as Map);
+        explicitType = dayTypes[todayKey] as String?;
+      } catch (_) {}
+    }
+    if (explicitType != 'free' && explicitType != 'vacation' && explicitType != 'sick') {
+      final settingsRaw = prefs.getString('app_settings');
+      double dailyTargetHours = 8.0;
+      if (settingsRaw != null) {
+        try {
+          final settings = Map<String, dynamic>.from(jsonDecode(settingsRaw) as Map);
+          dailyTargetHours = (settings['dailyTargetHours'] as num?)?.toDouble() ?? 8.0;
+        } catch (_) {}
+      }
+      if (todayDate.weekday >= DateTime.monday && todayDate.weekday <= DateTime.friday) {
+        todayTarget = Duration(minutes: (dailyTargetHours * 60).round());
+      }
+    }
+  }
+
+  final todayBalance = today - todayTarget;
+  final remainingToday = todayTarget - today;
+
   String _fmtDur(Duration d) {
     final neg = d.isNegative;
     final abs = neg ? -d : d;
@@ -281,6 +329,8 @@ Future<void> backgroundCallback(Uri? uri) async {
   await HomeWidget.saveWidgetData<bool>('is_working', isWorking);
   await HomeWidget.saveWidgetData<bool>('is_paused', isPausedNow);
   await HomeWidget.saveWidgetData<String>('today_duration', _fmtDur(today));
+  await HomeWidget.saveWidgetData<String>('remaining_duration', _fmtDur(remainingToday));
+  await HomeWidget.saveWidgetData<String>('today_balance', _fmtDur(todayBalance));
   await HomeWidget.saveWidgetData<String?>(
     'active_start_millis',
     newActiveRaw != null ? DateTime.parse(newActiveRaw).millisecondsSinceEpoch.toString() : null,
@@ -308,6 +358,8 @@ class MyApp extends StatelessWidget {
 class _OverviewData {
   const _OverviewData({
     required this.today,
+    required this.todayTarget,
+    required this.todayBalance,
     required this.remainingToday,
     required this.isWorking,
     required this.monthWorked,
@@ -317,6 +369,8 @@ class _OverviewData {
   });
 
   final Duration today;
+  final Duration todayTarget;
+  final Duration todayBalance;
   final Duration remainingToday;
   final bool isWorking;
   final Duration monthWorked;
@@ -1108,6 +1162,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   _OverviewData buildOverviewData() {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
+    final todayWorked = todayDuration();
+    final todayTarget = plannedDurationForDay(today);
+    final todayBalance = todayWorked - todayTarget;
     final monthWorked = monthDuration(now, until: today);
     final effectiveMonthTarget = effectiveMonthTargetDuration(
       now,
@@ -1115,8 +1172,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     );
 
     return _OverviewData(
-      today: todayDuration(),
-      remainingToday: remainingToday(),
+      today: todayWorked,
+      todayTarget: todayTarget,
+      todayBalance: todayBalance,
+      remainingToday: todayTarget - todayWorked,
       isWorking: activeStart != null,
       monthWorked: monthWorked,
       monthTarget: monthlyTargetDuration(now),
@@ -1361,6 +1420,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     await HomeWidget.saveWidgetData<String>(
       'remaining_duration',
       formatDuration(overview.remainingToday),
+    );
+    await HomeWidget.saveWidgetData<String>(
+      'today_balance',
+      formatDuration(overview.todayBalance),
     );
     await HomeWidget.saveWidgetData<String>(
       'status_text',
@@ -1874,8 +1937,14 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                 const SizedBox(height: 8),
                 Text(
                   data.remainingToday.isNegative
-                      ? 'Ueber Tagesziel: ${formatDuration(data.remainingToday)}'
+                      ? 'Ueber Tagesziel: ${formatDuration(-data.remainingToday)}'
                       : 'Noch bis Feierabend: ${formatDuration(data.remainingToday)}',
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  data.todayBalance.isNegative
+                      ? 'Heute im Minus: ${formatDuration(data.todayBalance)}'
+                      : 'Heute im Plus: ${formatDuration(data.todayBalance)}',
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -1937,7 +2006,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
               child: buildBalanceCard(
                 context: context,
                 title: 'Heute',
-                balance: data.today - targetPerWorkday(DateTime.now()),
+                balance: data.todayBalance,
                 icon: Icons.today,
               ),
             ),
