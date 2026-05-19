@@ -109,14 +109,33 @@
         android:textSize="18sp"
         android:textStyle="bold" />
 
-    <Button
-        android:id="@+id/widget_action_button"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
-        android:backgroundTint="#CBE9DF"
-        android:text="Schnellstart"
-        android:textAllCaps="false"
-        android:textColor="#13342C" />
+        android:orientation="horizontal"
+        android:spacing="8dp">
+
+        <Button
+            android:id="@+id/widget_main_button"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:backgroundTint="#CBE9DF"
+            android:text="Start"
+            android:textAllCaps="false"
+            android:textColor="#13342C" />
+
+        <Button
+            android:id="@+id/widget_pause_button"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:backgroundTint="#CBE9DF"
+            android:text="Pause"
+            android:textAllCaps="false"
+            android:textColor="#13342C"
+            android:visibility="gone" />
+    </LinearLayout>
 
 </LinearLayout>

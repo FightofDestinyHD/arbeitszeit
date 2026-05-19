@@ -33,7 +33,6 @@ class ArbeitszeitWidgetProvider : HomeWidgetProvider() {
             val monthBalance = widgetData.getString("month_balance", "0h 0m") ?: "0h 0m"
             val isWorking = widgetData.getBoolean("is_working", false)
             val isPaused = widgetData.getBoolean("is_paused", false)
-            val actionLabel = widgetData.getString("action_label", "Start") ?: "Start"
             val activeStartMillis = widgetData.getString("active_start_millis", null)?.toLongOrNull()
             val statusText = when {
                 isPaused -> "Pause läuft"
@@ -41,20 +40,31 @@ class ArbeitszeitWidgetProvider : HomeWidgetProvider() {
                 else -> "Nicht eingestempelt"
             }
 
-            val widgetAction = when {
-                isPaused -> "arbeitszeit://resume"
-                isWorking -> "arbeitszeit://pause"
-                else -> "arbeitszeit://start"
-            }
-
-            val launchIntent = Intent(context, MainActivity::class.java).apply {
+            // Main button: Start oder Stop
+            val mainAction = if (isWorking) "arbeitszeit://stop" else "arbeitszeit://start"
+            val mainLabel = if (isWorking) "Stop" else "Start"
+            val mainIntent = Intent(context, MainActivity::class.java).apply {
                 action = "es.antonborri.home_widget.action.LAUNCH"
-                data = Uri.parse(widgetAction)
+                data = Uri.parse(mainAction)
             }
-            val pendingIntent = PendingIntent.getActivity(
+            val mainPendingIntent = PendingIntent.getActivity(
                 context,
-                widgetAction.hashCode(),
-                launchIntent,
+                mainAction.hashCode(),
+                mainIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+
+            // Pause button: nur sichtbar wenn Schicht läuft
+            val pauseAction = if (isPaused) "arbeitszeit://resume" else "arbeitszeit://pause"
+            val pauseLabel = if (isPaused) "Weiter" else "Pause"
+            val pauseIntent = Intent(context, MainActivity::class.java).apply {
+                action = "es.antonborri.home_widget.action.LAUNCH"
+                data = Uri.parse(pauseAction)
+            }
+            val pausePendingIntent = PendingIntent.getActivity(
+                context,
+                pauseAction.hashCode(),
+                pauseIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
 
@@ -62,9 +72,16 @@ class ArbeitszeitWidgetProvider : HomeWidgetProvider() {
             views.setTextViewText(R.id.widget_today_value, todayDuration)
             views.setTextViewText(R.id.widget_remaining_value, remainingDuration)
             views.setTextViewText(R.id.widget_balance_value, monthBalance)
-            views.setTextViewText(R.id.widget_action_button, actionLabel)
-            views.setOnClickPendingIntent(R.id.widget_root, pendingIntent)
-            views.setOnClickPendingIntent(R.id.widget_action_button, pendingIntent)
+            views.setTextViewText(R.id.widget_main_button, mainLabel)
+            views.setOnClickPendingIntent(R.id.widget_main_button, mainPendingIntent)
+            
+            if (isWorking) {
+                views.setViewVisibility(R.id.widget_pause_button, View.VISIBLE)
+                views.setTextViewText(R.id.widget_pause_button, pauseLabel)
+                views.setOnClickPendingIntent(R.id.widget_pause_button, pausePendingIntent)
+            } else {
+                views.setViewVisibility(R.id.widget_pause_button, View.GONE)
+            }
 
             if (isWorking && activeStartMillis != null) {
                 val base = SystemClock.elapsedRealtime() - (System.currentTimeMillis() - activeStartMillis)
