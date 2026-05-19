@@ -754,6 +754,43 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     return Duration(minutes: (settings.dailyTargetHours * 60).round());
   }
 
+  bool countsAsTargetWorkday(DateTime day) {
+    final normalizedDay = DateTime(day.year, day.month, day.day);
+    final hasSession = sessions.any((session) => isSameDay(session.start, normalizedDay));
+    final explicitType = dayTypes[dayKey(normalizedDay)];
+
+    if (hasSession) {
+      return true;
+    }
+    if (explicitType == DayType.free ||
+        explicitType == DayType.vacation ||
+        explicitType == DayType.sick) {
+      return false;
+    }
+
+    return normalizedDay.weekday >= DateTime.monday &&
+        normalizedDay.weekday <= DateTime.friday;
+  }
+
+  Duration effectiveMonthTargetDuration(DateTime month, {DateTime? until}) {
+    final firstDay = DateTime(month.year, month.month, 1);
+    final monthLastDay = DateTime(month.year, month.month + 1, 0);
+    final endDay = until == null
+        ? monthLastDay
+        : DateTime(until.year, until.month, until.day).isBefore(monthLastDay)
+            ? DateTime(until.year, until.month, until.day)
+            : monthLastDay;
+
+    var total = Duration.zero;
+    final targetPerDay = targetPerWorkday(month);
+    for (var day = firstDay; !day.isAfter(endDay); day = day.add(const Duration(days: 1))) {
+      if (countsAsTargetWorkday(day)) {
+        total += targetPerDay;
+      }
+    }
+    return total;
+  }
+
   Duration remainingToday() {
     final target = targetPerWorkday(DateTime.now());
     final remaining = target - todayDuration();
@@ -998,26 +1035,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   _OverviewData buildOverviewData() {
     final now = DateTime.now();
     final monthWorked = monthDuration(now);
-    final monthTarget = monthlyTargetDuration(now);
-
-    // Effektives Tagessoll: nur vergangene Tage + heute zählen ins Soll
-    final targetPerDay = targetPerWorkday(now);
-    final firstDay = DateTime(now.year, now.month, 1);
-    final todayNormalized = DateTime(now.year, now.month, now.day);
-    var effectiveMonthTarget = Duration.zero;
-    for (var day = firstDay;
-        !day.isAfter(todayNormalized);
-        day = day.add(const Duration(days: 1))) {
-      final normalizedDay = DateTime(day.year, day.month, day.day);
-      final effectiveType = effectiveDayType(normalizedDay);
-      final hasSession = sessions.any((s) => isSameDay(s.start, normalizedDay));
-      if (hasSession ||
-          (effectiveType != DayType.vacation &&
-              effectiveType != DayType.sick &&
-              effectiveType != DayType.free)) {
-        effectiveMonthTarget += targetPerDay;
-      }
-    }
+    final monthTarget = effectiveMonthTargetDuration(
+      now,
+      until: DateTime(now.year, now.month, now.day),
+    );
 
     return _OverviewData(
       today: todayDuration(),
@@ -1025,7 +1046,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       isWorking: activeStart != null,
       monthWorked: monthWorked,
       monthTarget: monthTarget,
-      monthOverUnder: monthWorked - effectiveMonthTarget,
+      monthOverUnder: monthWorked - monthTarget,
       activeSince: activeStart,
     );
   }
@@ -1070,7 +1091,11 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
           (byWeekday[session.start.weekday] ?? Duration.zero) + session.duration;
     }
 
-    final monthOvertime = monthDuration(now) - monthlyTargetDuration(now);
+    final monthOvertime = monthDuration(now) -
+        effectiveMonthTargetDuration(
+          now,
+          until: DateTime(now.year, now.month, now.day),
+        );
 
     return _StatsData(
       averageWorkDay: average,
@@ -1092,7 +1117,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       final normalizedDay = DateTime(day.year, day.month, day.day);
       final weekIndex = ((normalizedDay.day - 1) ~/ 7) + 1;
       final hasSession = sessions.any((session) => isSameDay(session.start, normalizedDay));
-      final effectiveType = effectiveDayType(normalizedDay);
+      final targetDay = countsAsTargetWorkday(normalizedDay);
       final isPast = normalizedDay.isBefore(todayNormalized);
 
       Duration dayBalance = Duration.zero;
@@ -1100,15 +1125,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
         final worked = sessions
             .where((session) => isSameDay(session.start, normalizedDay))
             .fold(Duration.zero, (total, session) => total + session.duration);
-        dayBalance = worked - targetPerDay;
-      } else if (effectiveType == DayType.vacation || effectiveType == DayType.sick || effectiveType == DayType.free) {
-        // Als Frei/Urlaub/Krank markiert → kein Minus
-        dayBalance = Duration.zero;
-      } else if (isPast) {
-        // Vergangener Werktag ohne Eintrag und nicht als frei markiert → Minusstunden
+        dayBalance = targetDay ? worked - targetPerDay : worked;
+      } else if (targetDay && isPast) {
         dayBalance = -targetPerDay;
       }
-      // Heute und Zukunft ohne Eintrag → kein Minus
 
       weeks[weekIndex] = (weeks[weekIndex] ?? Duration.zero) + dayBalance;
     }
