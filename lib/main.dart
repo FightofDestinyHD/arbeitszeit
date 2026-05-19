@@ -556,6 +556,33 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       restoredPlannedShifts[dayKey(shift.day)] = shift;
     }
 
+    final today = DateTime.now();
+    final todayNormalized = DateTime(today.year, today.month, today.day);
+    final migratedSessions = <WorkSession>[];
+    var migratedLegacyPlannedSessions = false;
+    for (final session in restoredSessions) {
+      final sessionDay = DateTime(session.start.year, session.start.month, session.start.day);
+      final isTodayOrFuture = !sessionDay.isBefore(todayNormalized);
+      if (isTodayOrFuture && !restoredPlannedShifts.containsKey(dayKey(sessionDay))) {
+        final matchingTemplate = shiftTemplates.cast<ShiftTemplate?>().firstWhere(
+          (template) => template != null && matchesShiftTemplate(session, template),
+          orElse: () => null,
+        );
+        if (matchingTemplate != null) {
+          restoredPlannedShifts[dayKey(sessionDay)] = PlannedShift(
+            day: sessionDay,
+            start: session.start,
+            end: session.end,
+            name: matchingTemplate.name,
+            pausedDuration: session.pausedDuration,
+          );
+          migratedLegacyPlannedSessions = true;
+          continue;
+        }
+      }
+      migratedSessions.add(session);
+    }
+
     final activeStartRaw = prefs.getString(activeStartKey);
     final pauseStartRaw = prefs.getString(pauseStartKey);
     final pausedSecondsRaw = prefs.getInt(currentSessionPausedKey) ?? 0;
@@ -590,7 +617,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     setState(() {
       sessions
         ..clear()
-        ..addAll(restoredSessions);
+        ..addAll(migratedSessions);
       plannedShifts
         ..clear()
         ..addAll(restoredPlannedShifts);
@@ -605,6 +632,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
         ..addAll(restoredDayTypes);
       loading = false;
     });
+
+    if (migratedLegacyPlannedSessions) {
+      await persistState();
+    }
 
     await syncWidgetData();
 
@@ -854,6 +885,25 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       return shift.duration;
     }
     return Duration.zero;
+  }
+
+  bool matchesShiftTemplate(WorkSession session, ShiftTemplate template) {
+    final sessionStart = TimeOfDay.fromDateTime(session.start);
+    final sessionEnd = TimeOfDay.fromDateTime(session.end);
+    final expectedPresence = (() {
+      final start = DateTime(2000, 1, 1, template.start.hour, template.start.minute);
+      var end = DateTime(2000, 1, 1, template.end.hour, template.end.minute);
+      if (!end.isAfter(start)) {
+        end = end.add(const Duration(days: 1));
+      }
+      return end.difference(start);
+    })();
+
+    return sessionStart.hour == template.start.hour &&
+        sessionStart.minute == template.start.minute &&
+        sessionEnd.hour == template.end.hour &&
+        sessionEnd.minute == template.end.minute &&
+        session.pausedDuration == legalBreakDeduction(expectedPresence);
   }
 
   Duration actualDurationForDay(DateTime day) {
