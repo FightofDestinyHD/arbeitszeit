@@ -1,4 +1,4 @@
-name: Build & Release APK
+name: Release APK
 
 on:
   push:
@@ -13,73 +13,20 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Cache Gradle packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
-          restore-keys: gradle-
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.41.9'
-          cache: true
-
-      - name: Detect Flutter project root
-        id: project
+      - name: Verify APK exists
         shell: bash
         run: |
-          if [ -f "pubspec.yaml" ]; then
-            echo "dir=." >> "$GITHUB_OUTPUT"
-            exit 0
+          if [ ! -f "dist/app-release.apk" ]; then
+            echo "ERROR: dist/app-release.apk not found."
+            echo "Please build the APK locally and commit it to dist/ before tagging."
+            exit 1
           fi
-
-          MATCHES=$(find . -maxdepth 3 -name pubspec.yaml | sed 's|^./||')
-          COUNT=$(echo "$MATCHES" | grep -c . || true)
-
-          if [ "$COUNT" -eq 1 ]; then
-            DIR=$(dirname "$(echo "$MATCHES" | head -n 1)")
-            echo "dir=$DIR" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "Expected exactly one Flutter project root (pubspec.yaml), found: $COUNT"
-          echo "$MATCHES"
-          exit 1
-
-      - name: Install dependencies
-        working-directory: ${{ steps.project.outputs.dir }}
-        run: flutter pub get
-
-      - name: Decode Keystore
-        shell: bash
-        run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > ${{ steps.project.outputs.dir }}/android/app/arbeitszeit.jks
-
-      - name: Create key.properties
-        shell: bash
-        run: |
-          cat > ${{ steps.project.outputs.dir }}/android/key.properties <<EOF
-          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
-          keyPassword=${{ secrets.KEY_PASSWORD }}
-          keyAlias=arbeitszeit
-          storeFile=arbeitszeit.jks
-          EOF
 
       - name: Derive version metadata
         id: version
@@ -101,28 +48,20 @@ jobs:
           echo "build_name=$BUILD_NAME" >> "$GITHUB_OUTPUT"
           echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
 
-      - name: Build APK (release)
-        working-directory: ${{ steps.project.outputs.dir }}
-        run: |
-          flutter build apk --release \
-            --build-name="${{ steps.version.outputs.build_name }}" \
-            --build-number="${{ steps.version.outputs.build_number }}"
-
       - name: Generate update.json
-        working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
           VERSION="${{ steps.version.outputs.tag_version }}"
           BUILD_NUMBER="${{ steps.version.outputs.build_number }}"
           APK_URL="https://github.com/${{ github.repository }}/releases/download/${VERSION}/app-release.apk"
           NOTES=$(git tag -l --format='%(contents)' $VERSION | head -n 1)
-          echo "{\"version\": \"$VERSION\", \"build_number\": $BUILD_NUMBER, \"apk_url\": \"$APK_URL\", \"notes\": \"$NOTES\"}" > update.json
+          echo "{\"version\": \"$VERSION\", \"build_number\": $BUILD_NUMBER, \"apk_url\": \"$APK_URL\", \"notes\": \"$NOTES\"}" > dist/update.json
 
       - name: Upload APK & update.json to Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/app-release.apk
-            ${{ steps.project.outputs.dir }}/update.json
+            dist/app-release.apk
+            dist/update.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
