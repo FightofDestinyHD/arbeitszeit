@@ -33,6 +33,7 @@ class ArbeitszeitWidgetProvider : HomeWidgetProvider() {
             val isWorking = widgetData.getBoolean("is_working", false)
             val isPaused = widgetData.getBoolean("is_paused", false)
             val activeStartMillis = widgetData.getString("active_start_millis", null)?.toLongOrNull()
+            val pauseStartMillis = widgetData.getString("pause_start_millis", null)?.toLongOrNull()
 
             val statusText = when {
                 isPaused -> "Pause läuft"
@@ -78,6 +79,15 @@ class ArbeitszeitWidgetProvider : HomeWidgetProvider() {
             } else {
                 views.setViewVisibility(R.id.widget_chronometer, View.GONE)
                 views.setChronometer(R.id.widget_chronometer, SystemClock.elapsedRealtime(), null, false)
+            }
+
+            if (isPaused && pauseStartMillis != null) {
+                val pauseBase = SystemClock.elapsedRealtime() - (System.currentTimeMillis() - pauseStartMillis)
+                views.setViewVisibility(R.id.widget_pause_chronometer, View.VISIBLE)
+                views.setChronometer(R.id.widget_pause_chronometer, pauseBase, null, true)
+            } else {
+                views.setViewVisibility(R.id.widget_pause_chronometer, View.GONE)
+                views.setChronometer(R.id.widget_pause_chronometer, SystemClock.elapsedRealtime(), null, false)
             }
 
             appWidgetManager.updateAppWidget(widgetId, views)

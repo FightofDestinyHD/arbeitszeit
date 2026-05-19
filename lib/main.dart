@@ -4,11 +4,11 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:home_widget/home_widget.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:ota_update/ota_update.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -350,6 +350,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     List<ShiftTemplate> shiftTemplates = [];
   static const String githubOwner = 'FightofDestinyHD';
   static const String githubRepo = 'arbeitszeit';
+  static const MethodChannel updateInstallChannel = MethodChannel(
+    'arbeitszeit/update_install',
+  );
   static const String githubLatestReleaseUrl =
       'https://api.github.com/repos/$githubOwner/$githubRepo/releases/latest';
   static const String updateManifestUrl =
@@ -920,77 +923,6 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     }
   }
 
-  List<DateTime> daysForWeekdayInMonth(DateTime month, int weekday) {
-    final firstDay = DateTime(month.year, month.month, 1);
-    final nextMonth = DateTime(month.year, month.month + 1, 1);
-    final days = <DateTime>[];
-
-    for (var day = firstDay; day.isBefore(nextMonth); day = day.add(const Duration(days: 1))) {
-      if (day.weekday == weekday) {
-        days.add(day);
-      }
-    }
-
-    return days;
-  }
-
-  Future<void> assignActiveTemplateToWeekday(int weekday) async {
-    final template = activeCalendarTemplate;
-    if (!templateAssignMode || template == null) {
-      return;
-    }
-
-    final weekdayLabels = <int, String>{
-      DateTime.monday: 'Mo',
-      DateTime.tuesday: 'Di',
-      DateTime.wednesday: 'Mi',
-      DateTime.thursday: 'Do',
-      DateTime.friday: 'Fr',
-      DateTime.saturday: 'Sa',
-      DateTime.sunday: 'So',
-    };
-    final matchingDays = daysForWeekdayInMonth(focusedDay, weekday);
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Schichten zuweisen?'),
-          content: Text(
-            'Soll die Vorlage "${template.name}" wirklich auf alle ${weekdayLabels[weekday]} im ${DateFormat('MMMM yyyy', 'de_DE').format(focusedDay)} angewendet werden? (${matchingDays.length} Tage)',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Abbrechen'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('Anwenden'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (confirmed != true) {
-      return;
-    }
-
-    for (final day in matchingDays) {
-      await addShiftFromTemplate(template, day);
-    }
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Vorlage "${template.name}" auf alle ${weekdayLabels[weekday]} im ${DateFormat('MMMM yyyy', 'de_DE').format(focusedDay)} angewendet.',
-          ),
-        ),
-      );
-    }
-  }
-
   Future<void> showTemplateDialog({ShiftTemplate? template, int? index}) async {
     final nameController = TextEditingController(text: template?.name ?? '');
     final startController = TextEditingController(
@@ -1356,6 +1288,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     await HomeWidget.saveWidgetData<String?>(
       'active_start_millis',
       overview.activeSince?.millisecondsSinceEpoch.toString(),
+    );
+    await HomeWidget.saveWidgetData<String?>(
+      'pause_start_millis',
+      pauseStart?.millisecondsSinceEpoch.toString(),
     );
     await HomeWidget.updateWidget(
       name: 'ArbeitszeitWidgetProvider',
@@ -1728,74 +1664,70 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       updateMessage = 'Update wird heruntergeladen...';
     });
 
-    StreamSubscription<dynamic>? subscription;
     try {
-      final done = Completer<void>();
-      subscription = OtaUpdate().execute(
-        manifest.apkUrl,
-        destinationFilename: 'arbeitszeit_${manifest.version.replaceAll('.', '_')}.apk',
-      ).listen((event) {
+      final uri = Uri.tryParse(manifest.apkUrl);
+      if (uri == null) {
+        throw Exception('APK-URL ist ungültig.');
+      }
+
+      final client = http.Client();
+      try {
+        final request = http.Request('GET', uri);
+        final response = await client.send(request);
+        if (response.statusCode != 200) {
+          throw Exception('Download fehlgeschlagen (${response.statusCode}).');
+        }
+
+        final dir = await getApplicationDocumentsDirectory();
+        final apkFile = File(
+          '${dir.path}/arbeitszeit_${manifest.version.replaceAll('.', '_')}.apk',
+        );
+        if (await apkFile.exists()) {
+          await apkFile.delete();
+        }
+
+        final sink = apkFile.openWrite();
+        var received = 0;
+        final total = response.contentLength ?? 0;
+
+        await for (final chunk in response.stream) {
+          received += chunk.length;
+          sink.add(chunk);
+          if (mounted && total > 0) {
+            final progress = ((received / total) * 100).clamp(0, 100).toStringAsFixed(0);
+            setState(() {
+              updateMessage = 'Update wird heruntergeladen... $progress%';
+            });
+          }
+        }
+        await sink.flush();
+        await sink.close();
+
         if (!mounted) {
           return;
         }
-        final status = event.status.toString();
-        final value = event.value.toString();
 
         setState(() {
-          if (status.contains('INSTALLING')) {
-            updateMessage =
-                'Download fertig. Android-Installer wird gestartet...';
-          } else if (status.contains('DOWNLOADING')) {
-            updateMessage = value;
-          } else if (status.contains('ALREADY_RUNNING_ERROR') ||
-              status.contains('PERMISSION_NOT_GRANTED_ERROR') ||
-              status.contains('INSTALL_FAILED')) {
-            updateMessage =
-                'In-App-Installation fehlgeschlagen. Nutze "APK im Browser öffnen".';
-            if (!done.isCompleted) {
-              done.complete();
-            }
-          } else {
-            updateMessage = value;
-          }
+          updateMessage = 'Download fertig. Android-Installer wird gestartet...';
         });
 
-        if (status.contains('INSTALLING') || status.contains('INSTALLED')) {
-          if (!done.isCompleted) {
-            done.complete();
-          }
-        }
-      }, onError: (error) {
-        if (!mounted) {
-          return;
-        }
-        setState(() {
-          updateMessage =
-              'Update-Installation fehlgeschlagen. Nutze "APK im Browser öffnen".';
+        await updateInstallChannel.invokeMethod('installApk', {
+          'filePath': apkFile.path,
         });
-        if (!done.isCompleted) {
-          done.complete();
-        }
-      });
-
-      await done.future.timeout(const Duration(minutes: 3), onTimeout: () {
-        if (mounted) {
-          setState(() {
-            updateMessage =
-                'Installer reagiert nicht. Bitte "APK im Browser öffnen" nutzen.';
-          });
-        }
-      });
+      } finally {
+        client.close();
+      }
     } catch (e) {
       setState(() {
         updateMessage =
             'Update-Installation fehlgeschlagen: $e. Nutze "APK im Browser öffnen".';
       });
     } finally {
-      await subscription?.cancel();
-      setState(() {
-        installingUpdate = false;
-      });
+      if (mounted) {
+        setState(() {
+          installingUpdate = false;
+        });
+      }
     }
   }
 
@@ -2032,15 +1964,6 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     final theme = Theme.of(context);
     final monthLabel = DateFormat('MMMM yyyy', 'de_DE').format(focusedDay);
     final weekNumbers = weekNumbersForMonth(focusedDay);
-    const weekdayLabels = <int, String>{
-      DateTime.monday: 'Mo',
-      DateTime.tuesday: 'Di',
-      DateTime.wednesday: 'Mi',
-      DateTime.thursday: 'Do',
-      DateTime.friday: 'Fr',
-      DateTime.saturday: 'Sa',
-      DateTime.sunday: 'So',
-    };
 
     Widget buildDayCell(DateTime day, {bool selected = false, bool today = false}) {
       final type = effectiveDayType(day);
@@ -2355,22 +2278,8 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          'Tippe auf einen Tag für Einzelzuweisung oder auf einen Wochentag für den gesamten sichtbaren Monat.',
+                          'Tippe im Kalender auf die gewünschten Tage, um die Vorlage manuell zuzuweisen.',
                           style: TextStyle(color: Colors.white.withValues(alpha: 0.78)),
-                        ),
-                        const SizedBox(height: 10),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: weekdayLabels.entries
-                              .map(
-                                (entry) => ActionChip(
-                                  avatar: const Icon(Icons.calendar_view_week, size: 18),
-                                  label: Text(entry.value),
-                                  onPressed: () => assignActiveTemplateToWeekday(entry.key),
-                                ),
-                              )
-                              .toList(),
                         ),
                         const SizedBox(height: 10),
                         SizedBox(
