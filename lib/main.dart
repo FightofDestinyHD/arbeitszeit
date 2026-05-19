@@ -143,9 +143,113 @@ class AppSettings {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('de_DE', null);
+  HomeWidget.registerBackgroundCallback(backgroundCallback);
   runApp(const MyApp());
 }
 
+/// Wird im Hintergrund-Isolate ausgeführt wenn Widget-Buttons gedrückt werden.
+/// Kein Flutter-UI, kein setState — direkt SharedPreferences lesen/schreiben.
+@pragma('vm:entry-point')
+Future<void> backgroundCallback(Uri? uri) async {
+  if (uri == null) return;
+  final action = uri.host.isNotEmpty ? uri.host : uri.path.replaceFirst('/', '');
+  final prefs = await SharedPreferences.getInstance();
+
+  final activeStartRaw = prefs.getString('active_start');
+  final pauseStartRaw = prefs.getString('pause_start');
+  final pausedSeconds = prefs.getInt('current_session_paused_seconds') ?? 0;
+
+  final now = DateTime.now();
+
+  switch (action) {
+    case 'start':
+      if (activeStartRaw == null) {
+        await prefs.setString('active_start', now.toIso8601String());
+        await prefs.remove('pause_start');
+        await prefs.remove('current_session_paused_seconds');
+      }
+    case 'stop':
+      if (activeStartRaw != null) {
+        // Session speichern
+        final start = DateTime.parse(activeStartRaw);
+        final pauseDur = pauseStartRaw != null
+            ? Duration(seconds: pausedSeconds) + now.difference(DateTime.parse(pauseStartRaw))
+            : Duration(seconds: pausedSeconds);
+        final sessions = prefs.getStringList('work_sessions') ?? [];
+        sessions.add(jsonEncode({
+          'start': start.toIso8601String(),
+          'end': now.toIso8601String(),
+          'paused_seconds': pauseDur.inSeconds,
+        }));
+        await prefs.setStringList('work_sessions', sessions);
+        await prefs.remove('active_start');
+        await prefs.remove('pause_start');
+        await prefs.remove('current_session_paused_seconds');
+      }
+    case 'pause':
+      if (activeStartRaw != null && pauseStartRaw == null) {
+        await prefs.setString('pause_start', now.toIso8601String());
+      }
+    case 'resume':
+      if (activeStartRaw != null && pauseStartRaw != null) {
+        final pauseStart = DateTime.parse(pauseStartRaw);
+        final addedPause = now.difference(pauseStart).inSeconds;
+        await prefs.setInt('current_session_paused_seconds', pausedSeconds + addedPause);
+        await prefs.remove('pause_start');
+      }
+  }
+
+  // Widget-Daten aktualisieren
+  final newActiveRaw = prefs.getString('active_start');
+  final newPauseRaw = prefs.getString('pause_start');
+  final newPaused = prefs.getInt('current_session_paused_seconds') ?? 0;
+  final isWorking = newActiveRaw != null;
+  final isPausedNow = newActiveRaw != null && newPauseRaw != null;
+
+  Duration today = Duration.zero;
+  if (newActiveRaw != null) {
+    final started = DateTime.parse(newActiveRaw);
+    final span = now.difference(started);
+    final ongoingPause = newPauseRaw != null ? now.difference(DateTime.parse(newPauseRaw)) : Duration.zero;
+    today = span - Duration(seconds: newPaused) - ongoingPause;
+  }
+
+  // Alle heutigen abgeschlossenen Sessions addieren
+  final rawSessions = prefs.getStringList('work_sessions') ?? [];
+  final todayKey = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+  for (final s in rawSessions) {
+    try {
+      final m = Map<String, dynamic>.from(jsonDecode(s) as Map);
+      final sessionStart = DateTime.parse(m['start'] as String);
+      final sessionEnd = DateTime.parse(m['end'] as String);
+      final sessionKey = '${sessionStart.year}-${sessionStart.month.toString().padLeft(2, '0')}-${sessionStart.day.toString().padLeft(2, '0')}';
+      if (sessionKey == todayKey) {
+        final pausedSec = (m['paused_seconds'] as num?)?.toInt() ?? 0;
+        today += sessionEnd.difference(sessionStart) - Duration(seconds: pausedSec);
+      }
+    } catch (_) {}
+  }
+
+  String _fmtDur(Duration d) {
+    final neg = d.isNegative;
+    final abs = neg ? -d : d;
+    final h = abs.inHours;
+    final m = abs.inMinutes.remainder(60);
+    return '${neg ? '-' : ''}${h}h ${m}m';
+  }
+
+  await HomeWidget.saveWidgetData<bool>('is_working', isWorking);
+  await HomeWidget.saveWidgetData<bool>('is_paused', isPausedNow);
+  await HomeWidget.saveWidgetData<String>('today_duration', _fmtDur(today));
+  await HomeWidget.saveWidgetData<String?>(
+    'active_start_millis',
+    newActiveRaw != null ? DateTime.parse(newActiveRaw).millisecondsSinceEpoch.toString() : null,
+  );
+  await HomeWidget.updateWidget(
+    name: 'ArbeitszeitWidgetProvider',
+    iOSName: 'ArbeitszeitWidget',
+  );
+}
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -279,6 +383,8 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   String? updateMessage;
   UpdateManifest? availableUpdate;
   String? updateSource; // 'GitHub' or 'Fallback'
+  bool templateAssignMode = false;
+  ShiftTemplate? activeCalendarTemplate;
   StreamSubscription<Uri?>? widgetClickSubscription;
   Uri? pendingWidgetUri;
 
@@ -779,6 +885,110 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     });
     await persistState();
     await syncWidgetData();
+  }
+
+  void activateTemplateAssignMode(ShiftTemplate template) {
+    setState(() {
+      templateAssignMode = true;
+      activeCalendarTemplate = template;
+    });
+  }
+
+  void stopTemplateAssignMode() {
+    setState(() {
+      templateAssignMode = false;
+      activeCalendarTemplate = null;
+    });
+  }
+
+  Future<void> assignActiveTemplateToDay(DateTime day) async {
+    final template = activeCalendarTemplate;
+    if (!templateAssignMode || template == null) {
+      return;
+    }
+
+    await addShiftFromTemplate(template, day);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Vorlage "${template.name}" auf ${DateFormat('dd.MM.yyyy').format(day)} angewendet.',
+          ),
+        ),
+      );
+    }
+  }
+
+  List<DateTime> daysForWeekdayInMonth(DateTime month, int weekday) {
+    final firstDay = DateTime(month.year, month.month, 1);
+    final nextMonth = DateTime(month.year, month.month + 1, 1);
+    final days = <DateTime>[];
+
+    for (var day = firstDay; day.isBefore(nextMonth); day = day.add(const Duration(days: 1))) {
+      if (day.weekday == weekday) {
+        days.add(day);
+      }
+    }
+
+    return days;
+  }
+
+  Future<void> assignActiveTemplateToWeekday(int weekday) async {
+    final template = activeCalendarTemplate;
+    if (!templateAssignMode || template == null) {
+      return;
+    }
+
+    final weekdayLabels = <int, String>{
+      DateTime.monday: 'Mo',
+      DateTime.tuesday: 'Di',
+      DateTime.wednesday: 'Mi',
+      DateTime.thursday: 'Do',
+      DateTime.friday: 'Fr',
+      DateTime.saturday: 'Sa',
+      DateTime.sunday: 'So',
+    };
+    final matchingDays = daysForWeekdayInMonth(focusedDay, weekday);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Schichten zuweisen?'),
+          content: Text(
+            'Soll die Vorlage "${template.name}" wirklich auf alle ${weekdayLabels[weekday]} im ${DateFormat('MMMM yyyy', 'de_DE').format(focusedDay)} angewendet werden? (${matchingDays.length} Tage)',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Abbrechen'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Anwenden'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    for (final day in matchingDays) {
+      await addShiftFromTemplate(template, day);
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Vorlage "${template.name}" auf alle ${weekdayLabels[weekday]} im ${DateFormat('MMMM yyyy', 'de_DE').format(focusedDay)} angewendet.',
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> showTemplateDialog({ShiftTemplate? template, int? index}) async {
@@ -1822,6 +2032,15 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     final theme = Theme.of(context);
     final monthLabel = DateFormat('MMMM yyyy', 'de_DE').format(focusedDay);
     final weekNumbers = weekNumbersForMonth(focusedDay);
+    const weekdayLabels = <int, String>{
+      DateTime.monday: 'Mo',
+      DateTime.tuesday: 'Di',
+      DateTime.wednesday: 'Mi',
+      DateTime.thursday: 'Do',
+      DateTime.friday: 'Fr',
+      DateTime.saturday: 'Sa',
+      DateTime.sunday: 'So',
+    };
 
     Widget buildDayCell(DateTime day, {bool selected = false, bool today = false}) {
       final type = effectiveDayType(day);
@@ -1990,11 +2209,14 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                         daysOfWeekHeight: 28,
                         headerVisible: false,
                         availableCalendarFormats: const {CalendarFormat.month: 'Monat'},
-                        onDaySelected: (selected, focused) {
+                        onDaySelected: (selected, focused) async {
                           setState(() {
                             selectedDay = selected;
                             focusedDay = focused;
                           });
+                          if (templateAssignMode && activeCalendarTemplate != null) {
+                            await assignActiveTemplateToDay(selected);
+                          }
                         },
                         onDayLongPressed: (selected, focused) async {
                           setState(() {
@@ -2112,6 +2334,57 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                     ),
                   ],
                 ),
+                if (templateAssignMode && activeCalendarTemplate != null) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primary.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: theme.colorScheme.primary.withValues(alpha: 0.28),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Editiermodus: ${activeCalendarTemplate!.name}',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Tippe auf einen Tag für Einzelzuweisung oder auf einen Wochentag für den gesamten sichtbaren Monat.',
+                          style: TextStyle(color: Colors.white.withValues(alpha: 0.78)),
+                        ),
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: weekdayLabels.entries
+                              .map(
+                                (entry) => ActionChip(
+                                  avatar: const Icon(Icons.calendar_view_week, size: 18),
+                                  label: Text(entry.value),
+                                  onPressed: () => assignActiveTemplateToWeekday(entry.key),
+                                ),
+                              )
+                              .toList(),
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: stopTemplateAssignMode,
+                            icon: const Icon(Icons.close),
+                            label: const Text('Editiermodus beenden'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -2154,6 +2427,36 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                     ),
                   ],
                 ),
+                if (templateAssignMode && activeCalendarTemplate != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4, bottom: 8),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.35),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.edit_calendar_outlined),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'Editiermodus aktiv: ${activeCalendarTemplate!.name}. Tippe im Kalender auf einen Tag.',
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: stopTemplateAssignMode,
+                            child: const Text('Beenden'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 if (shiftTemplates.isEmpty)
                   const Padding(
                     padding: EdgeInsets.only(top: 4),
@@ -2172,6 +2475,23 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                       trailing: Wrap(
                         spacing: 8,
                         children: [
+                          IconButton(
+                            onPressed: () {
+                              if (templateAssignMode && activeCalendarTemplate == template) {
+                                stopTemplateAssignMode();
+                              } else {
+                                activateTemplateAssignMode(template);
+                              }
+                            },
+                            icon: Icon(
+                              templateAssignMode && activeCalendarTemplate == template
+                                  ? Icons.check_circle
+                                  : Icons.edit_calendar_outlined,
+                            ),
+                            tooltip: templateAssignMode && activeCalendarTemplate == template
+                                ? 'Editiermodus beenden'
+                                : 'Im Kalender zuweisen',
+                          ),
                           IconButton(
                             onPressed: () => showTemplateDialog(template: template, index: idx),
                             icon: const Icon(Icons.edit_outlined),
@@ -2521,3 +2841,4 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     );
   }
 }
+

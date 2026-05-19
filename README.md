@@ -14,6 +14,8 @@ Cross-plattform Arbeitszeiterfassungs-App für Android und iOS. Einfaches und in
 - **Monatsansicht**: Übersichtliche dunkle Kalenderdarstellung mit Wochenzahlen
 - **Tagestypen**: Markierung von Urlaubstagen, Krankheitstagen und freien Tagen
 - **Schnelle Navigation**: Tippen zum Auswaehlen, langen Tippen zum Eintragen einer Schicht
+- **Vorlagen-Zuweisung im Kalender**: Schichtvorlagen im Editiermodus auf einzelne Tage oder ganze Wochentage im sichtbaren Monat anwenden
+- **Sicherheitsabfrage**: Bestätigungsdialog vor der Massenzuweisung auf alle gleichen Wochentage im Monat
 
 ### Widgets & Export
 - **Android Home-Widget**: Live-Widget mit aktuellem Status, Restzeit und Schaltern direkt vom Homescreen
