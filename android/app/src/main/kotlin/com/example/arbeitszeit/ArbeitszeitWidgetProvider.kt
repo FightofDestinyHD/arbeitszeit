@@ -1,31 +1,17 @@
 package com.example.arbeitszeit
 
-import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.content.Context
-import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.SystemClock
 import android.view.View
 import android.widget.RemoteViews
+import es.antonborri.home_widget.HomeWidgetBackgroundIntent
+import es.antonborri.home_widget.HomeWidgetLaunchIntent
 import es.antonborri.home_widget.HomeWidgetProvider
 
 class ArbeitszeitWidgetProvider : HomeWidgetProvider() {
-
-    private fun actionBroadcast(context: Context, uriString: String): PendingIntent {
-        val intent = Intent(WidgetActionReceiver.ACTION_WIDGET).apply {
-            setClass(context, WidgetActionReceiver::class.java)
-            putExtra(WidgetActionReceiver.EXTRA_URI, uriString)
-            // Jede URI braucht einen eindeutigen RequestCode damit PendingIntents nicht kollidieren
-        }
-        return PendingIntent.getBroadcast(
-            context,
-            uriString.hashCode(),
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-    }
 
     override fun onUpdate(
         context: Context,
@@ -34,12 +20,9 @@ class ArbeitszeitWidgetProvider : HomeWidgetProvider() {
         widgetData: SharedPreferences,
     ) {
         // Tippen auf den Widget-Hintergrund/Titel öffnet die App
-        val openAppIntent = Intent(context, MainActivity::class.java)
-        val openAppPendingIntent = PendingIntent.getActivity(
+        val openAppPendingIntent = HomeWidgetLaunchIntent.getActivity(
             context,
-            0,
-            openAppIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            MainActivity::class.java,
         )
 
         appWidgetIds.forEach { widgetId ->
@@ -60,19 +43,25 @@ class ArbeitszeitWidgetProvider : HomeWidgetProvider() {
             // Titel öffnet App
             views.setOnClickPendingIntent(R.id.widget_root, openAppPendingIntent)
 
-            // Start/Stop Button → Broadcast (öffnet App NICHT)
-            val mainAction = if (isWorking) "arbeitszeit://stop" else "arbeitszeit://start"
+            // Start/Stop Button → Background-Callback (öffnet App NICHT)
+            val mainUri = if (isWorking) Uri.parse("arbeitszeit://stop") else Uri.parse("arbeitszeit://start")
             val mainLabel = if (isWorking) "Stop" else "Start"
             views.setTextViewText(R.id.widget_main_button, mainLabel)
-            views.setOnClickPendingIntent(R.id.widget_main_button, actionBroadcast(context, mainAction))
+            views.setOnClickPendingIntent(
+                R.id.widget_main_button,
+                HomeWidgetBackgroundIntent.getBroadcast(context, mainUri),
+            )
 
-            // Pause/Weiter Button → Broadcast (öffnet App NICHT)
-            val pauseAction = if (isPaused) "arbeitszeit://resume" else "arbeitszeit://pause"
-            val pauseLabel = if (isPaused) "Weiter" else "Pause"
+            // Pause/Weiter Button → Background-Callback (öffnet App NICHT)
             if (isWorking) {
+                val pauseUri = if (isPaused) Uri.parse("arbeitszeit://resume") else Uri.parse("arbeitszeit://pause")
+                val pauseLabel = if (isPaused) "Weiter" else "Pause"
                 views.setViewVisibility(R.id.widget_pause_button, View.VISIBLE)
                 views.setTextViewText(R.id.widget_pause_button, pauseLabel)
-                views.setOnClickPendingIntent(R.id.widget_pause_button, actionBroadcast(context, pauseAction))
+                views.setOnClickPendingIntent(
+                    R.id.widget_pause_button,
+                    HomeWidgetBackgroundIntent.getBroadcast(context, pauseUri),
+                )
             } else {
                 views.setViewVisibility(R.id.widget_pause_button, View.GONE)
             }
