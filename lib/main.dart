@@ -25,18 +25,26 @@ class ShiftTemplate {
   ShiftTemplate({required this.name, required this.start, required this.end});
 
   Map<String, dynamic> toJson() => {
-        'name': name,
-      'start': '${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')}',
-      'end': '${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}',
-      };
+    'name': name,
+    'start':
+        '${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')}',
+    'end':
+        '${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}',
+  };
 
   static ShiftTemplate fromJson(Map<String, dynamic> json) {
     final startParts = (json['start'] as String).split(':');
     final endParts = (json['end'] as String).split(':');
     return ShiftTemplate(
       name: json['name'] as String,
-      start: TimeOfDay(hour: int.parse(startParts[0]), minute: int.parse(startParts[1])),
-      end: TimeOfDay(hour: int.parse(endParts[0]), minute: int.parse(endParts[1])),
+      start: TimeOfDay(
+        hour: int.parse(startParts[0]),
+        minute: int.parse(startParts[1]),
+      ),
+      end: TimeOfDay(
+        hour: int.parse(endParts[0]),
+        minute: int.parse(endParts[1]),
+      ),
     );
   }
 }
@@ -113,12 +121,7 @@ class PlannedShift {
   }
 }
 
-enum DayType {
-  worked,
-  vacation,
-  sick,
-  free,
-}
+enum DayType { worked, vacation, sick, free }
 
 class AppSettings {
   const AppSettings({
@@ -145,8 +148,10 @@ class AppSettings {
     return AppSettings(
       monthlyTargetHours: monthlyTargetHours ?? this.monthlyTargetHours,
       dailyTargetHours: dailyTargetHours ?? this.dailyTargetHours,
-      reminderWorkForgotten: reminderWorkForgotten ?? this.reminderWorkForgotten,
-      reminderBreakForgotten: reminderBreakForgotten ?? this.reminderBreakForgotten,
+      reminderWorkForgotten:
+          reminderWorkForgotten ?? this.reminderWorkForgotten,
+      reminderBreakForgotten:
+          reminderBreakForgotten ?? this.reminderBreakForgotten,
       reminderEndOfDay: reminderEndOfDay ?? this.reminderEndOfDay,
     );
   }
@@ -163,7 +168,8 @@ class AppSettings {
 
   static AppSettings fromJson(Map<String, dynamic> json) {
     return AppSettings(
-      monthlyTargetHours: (json['monthlyTargetHours'] as num?)?.toDouble() ?? 160,
+      monthlyTargetHours:
+          (json['monthlyTargetHours'] as num?)?.toDouble() ?? 160,
       dailyTargetHours: (json['dailyTargetHours'] as num?)?.toDouble() ?? 8.0,
       reminderWorkForgotten: json['reminderWorkForgotten'] as bool? ?? true,
       reminderBreakForgotten: json['reminderBreakForgotten'] as bool? ?? false,
@@ -192,7 +198,9 @@ Future<void> main() async {
 @pragma('vm:entry-point')
 Future<void> backgroundCallback(Uri? uri) async {
   if (uri == null) return;
-  final action = uri.host.isNotEmpty ? uri.host : uri.path.replaceFirst('/', '');
+  final action = uri.host.isNotEmpty
+      ? uri.host
+      : uri.path.replaceFirst('/', '');
   final prefs = await SharedPreferences.getInstance();
 
   final activeStartRaw = prefs.getString('active_start');
@@ -213,14 +221,17 @@ Future<void> backgroundCallback(Uri? uri) async {
         // Session speichern
         final start = DateTime.parse(activeStartRaw);
         final pauseDur = pauseStartRaw != null
-            ? Duration(seconds: pausedSeconds) + now.difference(DateTime.parse(pauseStartRaw))
+            ? Duration(seconds: pausedSeconds) +
+                  now.difference(DateTime.parse(pauseStartRaw))
             : Duration(seconds: pausedSeconds);
         final sessions = prefs.getStringList('work_sessions') ?? [];
-        sessions.add(jsonEncode({
-          'start': start.toIso8601String(),
-          'end': now.toIso8601String(),
-          'paused_seconds': pauseDur.inSeconds,
-        }));
+        sessions.add(
+          jsonEncode({
+            'start': start.toIso8601String(),
+            'end': now.toIso8601String(),
+            'paused_seconds': pauseDur.inSeconds,
+          }),
+        );
         await prefs.setStringList('work_sessions', sessions);
 
         final dayTypeRaw = prefs.getString('day_types');
@@ -244,7 +255,10 @@ Future<void> backgroundCallback(Uri? uri) async {
       if (activeStartRaw != null && pauseStartRaw != null) {
         final pauseStart = DateTime.parse(pauseStartRaw);
         final addedPause = now.difference(pauseStart).inSeconds;
-        await prefs.setInt('current_session_paused_seconds', pausedSeconds + addedPause);
+        await prefs.setInt(
+          'current_session_paused_seconds',
+          pausedSeconds + addedPause,
+        );
         await prefs.remove('pause_start');
       }
   }
@@ -257,14 +271,19 @@ Future<void> backgroundCallback(Uri? uri) async {
   final isPausedNow = newActiveRaw != null && newPauseRaw != null;
 
   final todayDate = DateTime(now.year, now.month, now.day);
-  final todayKey = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+  final todayKey =
+      '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
 
   Duration today = Duration.zero;
   if (newActiveRaw != null) {
     final started = DateTime.parse(newActiveRaw);
-    if (started.year == todayDate.year && started.month == todayDate.month && started.day == todayDate.day) {
+    if (started.year == todayDate.year &&
+        started.month == todayDate.month &&
+        started.day == todayDate.day) {
       final span = now.difference(started);
-      final ongoingPause = newPauseRaw != null ? now.difference(DateTime.parse(newPauseRaw)) : Duration.zero;
+      final ongoingPause = newPauseRaw != null
+          ? now.difference(DateTime.parse(newPauseRaw))
+          : Duration.zero;
       today = span - Duration(seconds: newPaused) - ongoingPause;
     }
   }
@@ -276,10 +295,12 @@ Future<void> backgroundCallback(Uri? uri) async {
       final m = Map<String, dynamic>.from(jsonDecode(s) as Map);
       final sessionStart = DateTime.parse(m['start'] as String);
       final sessionEnd = DateTime.parse(m['end'] as String);
-      final sessionKey = '${sessionStart.year}-${sessionStart.month.toString().padLeft(2, '0')}-${sessionStart.day.toString().padLeft(2, '0')}';
+      final sessionKey =
+          '${sessionStart.year}-${sessionStart.month.toString().padLeft(2, '0')}-${sessionStart.day.toString().padLeft(2, '0')}';
       if (sessionKey == todayKey) {
         final pausedSec = (m['paused_seconds'] as num?)?.toInt() ?? 0;
-        today += sessionEnd.difference(sessionStart) - Duration(seconds: pausedSec);
+        today +=
+            sessionEnd.difference(sessionStart) - Duration(seconds: pausedSec);
       }
     } catch (_) {}
   }
@@ -290,7 +311,8 @@ Future<void> backgroundCallback(Uri? uri) async {
     try {
       final map = Map<String, dynamic>.from(jsonDecode(item) as Map);
       final day = DateTime.parse(map['day'] as String);
-      final planKey = '${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}';
+      final planKey =
+          '${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}';
       if (planKey == todayKey) {
         final start = DateTime.parse(map['start'] as String);
         final end = DateTime.parse(map['end'] as String);
@@ -306,16 +328,22 @@ Future<void> backgroundCallback(Uri? uri) async {
     try {
       final settingsRaw = prefs.getString('app_settings');
       if (settingsRaw != null) {
-        final settings = Map<String, dynamic>.from(jsonDecode(settingsRaw) as Map);
-        dailyTargetHours = (settings['dailyTargetHours'] as num?)?.toDouble() ?? 8.0;
+        final settings = Map<String, dynamic>.from(
+          jsonDecode(settingsRaw) as Map,
+        );
+        dailyTargetHours =
+            (settings['dailyTargetHours'] as num?)?.toDouble() ?? 8.0;
       }
     } catch (_) {}
 
-    var isTargetDay = now.weekday >= DateTime.monday && now.weekday <= DateTime.friday;
+    var isTargetDay =
+        now.weekday >= DateTime.monday && now.weekday <= DateTime.friday;
     try {
       final dayTypesRaw = prefs.getString('day_types');
       if (dayTypesRaw != null) {
-        final dayTypes = Map<String, dynamic>.from(jsonDecode(dayTypesRaw) as Map);
+        final dayTypes = Map<String, dynamic>.from(
+          jsonDecode(dayTypesRaw) as Map,
+        );
         final type = (dayTypes[todayKey] as String?)?.trim();
         if (type == 'free' || type == 'vacation' || type == 'sick') {
           isTargetDay = false;
@@ -343,17 +371,26 @@ Future<void> backgroundCallback(Uri? uri) async {
   await HomeWidget.saveWidgetData<bool>('is_working', isWorking);
   await HomeWidget.saveWidgetData<bool>('is_paused', isPausedNow);
   await HomeWidget.saveWidgetData<String>('today_duration', _fmtDur(today));
-  await HomeWidget.saveWidgetData<String>('remaining_duration', _fmtDur(remainingToday));
-  await HomeWidget.saveWidgetData<String>('today_balance', _fmtDur(todayBalance));
+  await HomeWidget.saveWidgetData<String>(
+    'remaining_duration',
+    _fmtDur(remainingToday),
+  );
+  await HomeWidget.saveWidgetData<String>(
+    'today_balance',
+    _fmtDur(todayBalance),
+  );
   await HomeWidget.saveWidgetData<String?>(
     'active_start_millis',
-    newActiveRaw != null ? DateTime.parse(newActiveRaw).millisecondsSinceEpoch.toString() : null,
+    newActiveRaw != null
+        ? DateTime.parse(newActiveRaw).millisecondsSinceEpoch.toString()
+        : null,
   );
   await HomeWidget.updateWidget(
     name: 'ArbeitszeitWidgetProvider',
     iOSName: 'ArbeitszeitWidget',
   );
 }
+
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -408,10 +445,7 @@ class _StatsData {
 }
 
 class _WeeklyBalance {
-  const _WeeklyBalance({
-    required this.label,
-    required this.balance,
-  });
+  const _WeeklyBalance({required this.label, required this.balance});
 
   final String label;
   final Duration balance;
@@ -453,9 +487,9 @@ class WorkTimeHomePage extends StatefulWidget {
 }
 
 class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
-    static const String shiftTemplatesKey = 'shift_templates';
+  static const String shiftTemplatesKey = 'shift_templates';
 
-    List<ShiftTemplate> shiftTemplates = [];
+  List<ShiftTemplate> shiftTemplates = [];
   static const String githubOwner = 'FightofDestinyHD';
   static const String githubRepo = 'arbeitszeit';
   static const MethodChannel updateInstallChannel = MethodChannel(
@@ -470,7 +504,8 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   static const String plannedShiftsKey = 'planned_shifts';
   static const String activeStartKey = 'active_start';
   static const String pauseStartKey = 'pause_start';
-  static const String currentSessionPausedKey = 'current_session_paused_seconds';
+  static const String currentSessionPausedKey =
+      'current_session_paused_seconds';
   static const String settingsKey = 'app_settings';
   static const String dayTypesKey = 'day_types';
 
@@ -541,7 +576,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       return;
     }
 
-    final action = uri.host.isNotEmpty ? uri.host : uri.path.replaceFirst('/', '');
+    final action = uri.host.isNotEmpty
+        ? uri.host
+        : uri.path.replaceFirst('/', '');
     switch (action) {
       case 'start':
         if (activeStart == null) {
@@ -575,7 +612,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     // Schichtvorlagen laden
     final templatesRaw = prefs.getStringList(shiftTemplatesKey) ?? [];
     shiftTemplates = templatesRaw
-        .map((e) => ShiftTemplate.fromJson(jsonDecode(e) as Map<String, dynamic>))
+        .map(
+          (e) => ShiftTemplate.fromJson(jsonDecode(e) as Map<String, dynamic>),
+        )
         .toList();
 
     final rawSessions = prefs.getStringList(sessionsKey) ?? [];
@@ -595,44 +634,15 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
 
     final today = DateTime.now();
     final todayNormalized = DateTime(today.year, today.month, today.day);
-    final migratedSessions = <WorkSession>[];
-    var migratedLegacyPlannedSessions = false;
-    for (final session in restoredSessions) {
-      final sessionDay = DateTime(session.start.year, session.start.month, session.start.day);
-      final isTodayOrFuture = !sessionDay.isBefore(todayNormalized);
-      if (isTodayOrFuture && !restoredPlannedShifts.containsKey(dayKey(sessionDay))) {
-        final matchingTemplate = shiftTemplates.cast<ShiftTemplate?>().firstWhere(
-          (template) => template != null && matchesShiftTemplate(session, template),
-          orElse: () => null,
-        );
-        if (matchingTemplate != null) {
-          restoredPlannedShifts[dayKey(sessionDay)] = PlannedShift(
-            day: sessionDay,
-            start: session.start,
-            end: session.end,
-            name: matchingTemplate.name,
-            pausedDuration: session.pausedDuration,
-          );
-          migratedLegacyPlannedSessions = true;
-          continue;
-        }
-
-        final sessionLooksPlanned = session.pausedDuration == legalBreakDeduction(
-          session.end.difference(session.start),
-        );
-        if (sessionLooksPlanned) {
-          restoredPlannedShifts[dayKey(sessionDay)] = PlannedShift(
-            day: sessionDay,
-            start: session.start,
-            end: session.end,
-            name: 'Geplante Schicht',
-            pausedDuration: session.pausedDuration,
-          );
-          migratedLegacyPlannedSessions = true;
-          continue;
-        }
-      }
-      migratedSessions.add(session);
+    final todayKeyValue = dayKey(todayNormalized);
+    final placeholderShift = restoredPlannedShifts[todayKeyValue];
+    final hasFinishedSessionToday = restoredSessions.any(
+      (session) => isSameDay(session.start, todayNormalized),
+    );
+    if (placeholderShift != null &&
+        placeholderShift.name == 'Geplante Schicht' &&
+        !hasFinishedSessionToday) {
+      restoredPlannedShifts.remove(todayKeyValue);
     }
 
     final activeStartRaw = prefs.getString(activeStartKey);
@@ -651,7 +661,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     if (dayTypesRaw != null) {
       final map = Map<String, dynamic>.from(jsonDecode(dayTypesRaw) as Map);
       for (final entry in map.entries) {
-        restoredDayTypes[entry.key] = DayType.values.byName(entry.value as String);
+        restoredDayTypes[entry.key] = DayType.values.byName(
+          entry.value as String,
+        );
       }
     }
 
@@ -669,12 +681,13 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     setState(() {
       sessions
         ..clear()
-        ..addAll(migratedSessions);
+        ..addAll(restoredSessions);
       plannedShifts
         ..clear()
         ..addAll(restoredPlannedShifts);
-      activeStart =
-          activeStartRaw == null ? null : DateTime.parse(activeStartRaw);
+      activeStart = activeStartRaw == null
+          ? null
+          : DateTime.parse(activeStartRaw);
       pauseStart = null;
       currentSessionPaused = Duration(seconds: restoredPausedSeconds);
       autoBreakPromptShown = false;
@@ -684,10 +697,6 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
         ..addAll(restoredDayTypes);
       loading = false;
     });
-
-    if (migratedLegacyPlannedSessions) {
-      await persistState();
-    }
 
     await syncWidgetData();
 
@@ -701,7 +710,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   Future<void> persistState() async {
     final prefs = await SharedPreferences.getInstance();
     // Schichtvorlagen speichern
-    final encodedTemplates = shiftTemplates.map((t) => jsonEncode(t.toJson())).toList();
+    final encodedTemplates = shiftTemplates
+        .map((t) => jsonEncode(t.toJson()))
+        .toList();
     await prefs.setStringList(shiftTemplatesKey, encodedTemplates);
     final encodedSessions = sessions
         .map((session) => jsonEncode(session.toJson()))
@@ -731,7 +742,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       } else {
         await prefs.setString(pauseStartKey, pauseStart!.toIso8601String());
       }
-      await prefs.setInt(currentSessionPausedKey, currentSessionPaused.inSeconds);
+      await prefs.setInt(
+        currentSessionPausedKey,
+        currentSessionPaused.inSeconds,
+      );
     }
   }
 
@@ -756,7 +770,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
 
     final currentNow = now ?? DateTime.now();
     final activeSpan = currentNow.difference(started);
-    final ongoingPause = pauseStart == null ? Duration.zero : currentNow.difference(pauseStart!);
+    final ongoingPause = pauseStart == null
+        ? Duration.zero
+        : currentNow.difference(pauseStart!);
     return activeSpan - currentSessionPaused - ongoingPause;
   }
 
@@ -808,7 +824,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
         builder: (dialogContext) {
           return AlertDialog(
             title: const Text('Pause nicht vergessen?'),
-            content: const Text('Du hast jetzt 6 Stunden erreicht. Soll eine Pause gestartet werden?'),
+            content: const Text(
+              'Du hast jetzt 6 Stunden erreicht. Soll eine Pause gestartet werden?',
+            ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(dialogContext),
@@ -848,15 +866,13 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
 
     final startedAt = activeStart!;
     final end = DateTime.now();
-    final pausedDuration = currentSessionPaused + (pauseStart == null ? Duration.zero : end.difference(pauseStart!));
+    final pausedDuration =
+        currentSessionPaused +
+        (pauseStart == null ? Duration.zero : end.difference(pauseStart!));
     setState(() {
       sessions.insert(
         0,
-        WorkSession(
-          start: startedAt,
-          end: end,
-          pausedDuration: pausedDuration,
-        ),
+        WorkSession(start: startedAt, end: end, pausedDuration: pausedDuration),
       );
       dayTypes[dayKey(startedAt)] = DayType.worked;
       activeStart = null;
@@ -881,11 +897,15 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     final endDay = until == null
         ? monthLastDay
         : DateTime(until.year, until.month, until.day).isBefore(monthLastDay)
-            ? DateTime(until.year, until.month, until.day)
-            : monthLastDay;
+        ? DateTime(until.year, until.month, until.day)
+        : monthLastDay;
 
     var total = Duration.zero;
-    for (var day = firstDay; !day.isAfter(endDay); day = day.add(const Duration(days: 1))) {
+    for (
+      var day = firstDay;
+      !day.isAfter(endDay);
+      day = day.add(const Duration(days: 1))
+    ) {
       total += countedWorkDurationForDay(day);
     }
 
@@ -901,9 +921,11 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     final nextMonth = DateTime(month.year, month.month + 1, 1);
     var days = 0.0;
 
-    for (var day = first;
-        day.isBefore(nextMonth);
-        day = day.add(const Duration(days: 1))) {
+    for (
+      var day = first;
+      day.isBefore(nextMonth);
+      day = day.add(const Duration(days: 1))
+    ) {
       if (day.weekday >= DateTime.monday && day.weekday <= DateTime.friday) {
         days += 1;
       }
@@ -941,7 +963,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     return Duration.zero;
   }
 
-  Duration targetDurationForDayBalance(DateTime day, {required Duration worked}) {
+  Duration targetDurationForDayBalance(
+    DateTime day, {
+    required Duration worked,
+  }) {
     final planned = plannedDurationForDay(day);
     if (planned > Duration.zero) {
       return planned;
@@ -958,7 +983,13 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     final sessionStart = TimeOfDay.fromDateTime(session.start);
     final sessionEnd = TimeOfDay.fromDateTime(session.end);
     final expectedPresence = (() {
-      final start = DateTime(2000, 1, 1, template.start.hour, template.start.minute);
+      final start = DateTime(
+        2000,
+        1,
+        1,
+        template.start.hour,
+        template.start.minute,
+      );
       var end = DateTime(2000, 1, 1, template.end.hour, template.end.minute);
       if (!end.isAfter(start)) {
         end = end.add(const Duration(days: 1));
@@ -983,25 +1014,31 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
             return true;
           }
 
-          final sameStart = session.start.year == plannedShift.start.year &&
+          final sameStart =
+              session.start.year == plannedShift.start.year &&
               session.start.month == plannedShift.start.month &&
               session.start.day == plannedShift.start.day &&
               session.start.hour == plannedShift.start.hour &&
               session.start.minute == plannedShift.start.minute;
-          final sameEnd = session.end.year == plannedShift.end.year &&
+          final sameEnd =
+              session.end.year == plannedShift.end.year &&
               session.end.month == plannedShift.end.month &&
               session.end.day == plannedShift.end.day &&
               session.end.hour == plannedShift.end.hour &&
               session.end.minute == plannedShift.end.minute;
-          final samePause = session.pausedDuration == plannedShift.pausedDuration;
+          final samePause =
+              session.pausedDuration == plannedShift.pausedDuration;
 
           if (sameStart && sameEnd && samePause) {
             return false;
           }
 
-          final looksLikeSamePlannedDuration = session.duration == plannedShift.duration;
+          final looksLikeSamePlannedDuration =
+              session.duration == plannedShift.duration;
           final startsSameDay = isSameDay(session.start, plannedShift.day);
-          if (startsSameDay && looksLikeSamePlannedDuration && session.start.hour == plannedShift.start.hour) {
+          if (startsSameDay &&
+              looksLikeSamePlannedDuration &&
+              session.start.hour == plannedShift.start.hour) {
             return false;
           }
 
@@ -1043,11 +1080,15 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     final endDay = until == null
         ? monthLastDay
         : DateTime(until.year, until.month, until.day).isBefore(monthLastDay)
-            ? DateTime(until.year, until.month, until.day)
-            : monthLastDay;
+        ? DateTime(until.year, until.month, until.day)
+        : monthLastDay;
 
     var total = Duration.zero;
-    for (var day = firstDay; !day.isAfter(endDay); day = day.add(const Duration(days: 1))) {
+    for (
+      var day = firstDay;
+      !day.isAfter(endDay);
+      day = day.add(const Duration(days: 1))
+    ) {
       total += plannedDurationForDay(day);
     }
     return total;
@@ -1161,7 +1202,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     return Duration.zero;
   }
 
-  Future<void> addShiftFromTemplate(ShiftTemplate template, DateTime day) async {
+  Future<void> addShiftFromTemplate(
+    ShiftTemplate template,
+    DateTime day,
+  ) async {
     final start = DateTime(
       day.year,
       day.month,
@@ -1244,13 +1288,17 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: Text(template == null ? 'Vorlage erstellen' : 'Vorlage bearbeiten'),
+          title: Text(
+            template == null ? 'Vorlage erstellen' : 'Vorlage bearbeiten',
+          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: nameController,
-                decoration: const InputDecoration(labelText: 'Name (z.B. Frühschicht)'),
+                decoration: const InputDecoration(
+                  labelText: 'Name (z.B. Frühschicht)',
+                ),
               ),
               TextField(
                 controller: startController,
@@ -1309,7 +1357,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     final todayWorked = todayDuration();
     final todayTarget = targetDurationForDayBalance(today, worked: todayWorked);
     final hasTodayPlan = todayTarget > Duration.zero;
-    final todayBalance = hasTodayPlan ? todayWorked - todayTarget : Duration.zero;
+    final todayBalance = hasTodayPlan
+        ? todayWorked - todayTarget
+        : Duration.zero;
     final monthWorked = monthDuration(now, until: today);
     final monthTarget = monthlyTargetDuration(now);
 
@@ -1331,9 +1381,11 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     final today = DateTime(now.year, now.month, now.day);
 
     final byDay = <String, Duration>{};
-    for (var day = DateTime(now.year, now.month, 1);
-        !day.isAfter(today);
-        day = day.add(const Duration(days: 1))) {
+    for (
+      var day = DateTime(now.year, now.month, 1);
+      !day.isAfter(today);
+      day = day.add(const Duration(days: 1))
+    ) {
       final worked = countedWorkDurationForDay(day);
       if (worked > Duration.zero) {
         byDay[dayKey(day)] = worked;
@@ -1363,9 +1415,11 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       DateTime.sunday: Duration.zero,
     };
 
-    for (var day = DateTime(now.year, now.month, 1);
-        !day.isAfter(today);
-        day = day.add(const Duration(days: 1))) {
+    for (
+      var day = DateTime(now.year, now.month, 1);
+      !day.isAfter(today);
+      day = day.add(const Duration(days: 1))
+    ) {
       final worked = countedWorkDurationForDay(day);
       if (worked > Duration.zero) {
         byWeekday[day.weekday] =
@@ -1373,10 +1427,8 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       }
     }
 
-    final monthOvertime = monthDuration(
-          now,
-          until: DateTime(now.year, now.month, now.day),
-        ) -
+    final monthOvertime =
+        monthDuration(now, until: DateTime(now.year, now.month, now.day)) -
         monthlyTargetDuration(now);
 
     return _StatsData(
@@ -1394,7 +1446,11 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     final todayNormalized = DateTime(today.year, today.month, today.day);
     final weeks = <int, Duration>{};
 
-    for (var day = firstDay; !day.isAfter(lastDay); day = day.add(const Duration(days: 1))) {
+    for (
+      var day = firstDay;
+      !day.isAfter(lastDay);
+      day = day.add(const Duration(days: 1))
+    ) {
       final normalizedDay = DateTime(day.year, day.month, day.day);
       final weekIndex = ((normalizedDay.day - 1) ~/ 7) + 1;
       final targetDay = countsAsTargetWorkday(normalizedDay);
@@ -1417,7 +1473,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     }
 
     return weeks.entries
-        .map((entry) => _WeeklyBalance(label: 'W${entry.key}', balance: entry.value))
+        .map(
+          (entry) =>
+              _WeeklyBalance(label: 'W${entry.key}', balance: entry.value),
+        )
         .toList()
       ..sort((left, right) => left.label.compareTo(right.label));
   }
@@ -1467,9 +1526,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
           Text(
             formatDuration(balance),
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  color: color,
-                  fontWeight: FontWeight.w700,
-                ),
+              color: color,
+              fontWeight: FontWeight.w700,
+            ),
           ),
           const SizedBox(height: 4),
           Text(labelForBalance(balance), style: TextStyle(color: color)),
@@ -1478,7 +1537,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     );
   }
 
-  Widget buildWeeklyBalanceChart(BuildContext context, List<_WeeklyBalance> balances) {
+  Widget buildWeeklyBalanceChart(
+    BuildContext context,
+    List<_WeeklyBalance> balances,
+  ) {
     if (balances.isEmpty) {
       return const SizedBox.shrink();
     }
@@ -1531,21 +1593,28 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   }
 
   int isoWeekNumber(DateTime date) {
-    final mondayBasedWeekday = date.weekday == DateTime.sunday ? 7 : date.weekday;
+    final mondayBasedWeekday = date.weekday == DateTime.sunday
+        ? 7
+        : date.weekday;
     final thursday = date.add(Duration(days: 4 - mondayBasedWeekday));
     final firstThursday = DateTime(thursday.year, 1, 4);
     final firstMondayBasedWeekday = firstThursday.weekday == DateTime.sunday
         ? 7
         : firstThursday.weekday;
-    final firstWeekThursday = firstThursday
-        .add(Duration(days: 4 - firstMondayBasedWeekday));
+    final firstWeekThursday = firstThursday.add(
+      Duration(days: 4 - firstMondayBasedWeekday),
+    );
     return 1 + thursday.difference(firstWeekThursday).inDays ~/ 7;
   }
 
   List<int> weekNumbersForMonth(DateTime month) {
     final firstDay = DateTime(month.year, month.month, 1);
     final startOfGrid = firstDay.subtract(
-      Duration(days: firstDay.weekday == DateTime.sunday ? 6 : firstDay.weekday - DateTime.monday),
+      Duration(
+        days: firstDay.weekday == DateTime.sunday
+            ? 6
+            : firstDay.weekday - DateTime.monday,
+      ),
     );
 
     return List<int>.generate(
@@ -1578,14 +1647,8 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       'month_balance',
       formatDuration(overview.monthOverUnder),
     );
-    await HomeWidget.saveWidgetData<bool>(
-      'is_working',
-      overview.isWorking,
-    );
-    await HomeWidget.saveWidgetData<bool>(
-      'is_paused',
-      isPaused,
-    );
+    await HomeWidget.saveWidgetData<bool>('is_working', overview.isWorking);
+    await HomeWidget.saveWidgetData<bool>('is_paused', isPaused);
     await HomeWidget.saveWidgetData<String>(
       'action_label',
       activeStart == null
@@ -1617,7 +1680,8 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     buffer.writeln('Datum,Start,Ende,DauerMinuten');
 
     for (final session in sessions) {
-      if (session.start.year == month.year && session.start.month == month.month) {
+      if (session.start.year == month.year &&
+          session.start.month == month.month) {
         final day = DateFormat('yyyy-MM-dd').format(session.start);
         final start = formatTimeOfDay(TimeOfDay.fromDateTime(session.start));
         final end = formatTimeOfDay(TimeOfDay.fromDateTime(session.end));
@@ -1689,9 +1753,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
           content: TextField(
             controller: controller,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              labelText: 'Stunden pro Monat',
-            ),
+            decoration: const InputDecoration(labelText: 'Stunden pro Monat'),
           ),
           actions: [
             TextButton(
@@ -1700,7 +1762,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
             ),
             FilledButton(
               onPressed: () {
-                final parsed = double.tryParse(controller.text.replaceAll(',', '.'));
+                final parsed = double.tryParse(
+                  controller.text.replaceAll(',', '.'),
+                );
                 if (parsed != null && parsed > 0) {
                   Navigator.pop(context, parsed);
                 }
@@ -1747,7 +1811,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
             ),
             FilledButton(
               onPressed: () {
-                final parsed = double.tryParse(controller.text.replaceAll(',', '.'));
+                final parsed = double.tryParse(
+                  controller.text.replaceAll(',', '.'),
+                );
                 if (parsed != null && parsed > 0) {
                   Navigator.pop(context, parsed);
                 }
@@ -1771,15 +1837,15 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   }
 
   int compareVersions(String a, String b) {
-    final aParts = normalizedVersion(a)
-      .split('.')
-      .map((e) => int.tryParse(e) ?? 0)
-      .toList();
-    final bParts = normalizedVersion(b)
-      .split('.')
-      .map((e) => int.tryParse(e) ?? 0)
-      .toList();
-    final maxLen = aParts.length > bParts.length ? aParts.length : bParts.length;
+    final aParts = normalizedVersion(
+      a,
+    ).split('.').map((e) => int.tryParse(e) ?? 0).toList();
+    final bParts = normalizedVersion(
+      b,
+    ).split('.').map((e) => int.tryParse(e) ?? 0).toList();
+    final maxLen = aParts.length > bParts.length
+        ? aParts.length
+        : bParts.length;
 
     for (var i = 0; i < maxLen; i++) {
       final left = i < aParts.length ? aParts[i] : 0;
@@ -1817,10 +1883,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   }
 
   int buildNumberFromVersion(String raw) {
-    final parts = normalizedVersion(raw)
-        .split('.')
-        .map((e) => int.tryParse(e) ?? 0)
-        .toList();
+    final parts = normalizedVersion(
+      raw,
+    ).split('.').map((e) => int.tryParse(e) ?? 0).toList();
 
     final major = parts.isNotEmpty ? parts[0] : 0;
     final minor = parts.length > 1 ? parts[1] : 0;
@@ -1840,7 +1905,8 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     String apkUrl = '';
     for (final asset in assets) {
       final fileName = (asset['name'] as String? ?? '').toLowerCase();
-      final browserUrl = (asset['browser_download_url'] as String? ?? '').trim();
+      final browserUrl = (asset['browser_download_url'] as String? ?? '')
+          .trim();
       if (browserUrl.isEmpty) {
         continue;
       }
@@ -1881,8 +1947,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       setState(() {
         updateSource = 'GitHub';
       });
-      final releaseMap =
-          Map<String, dynamic>.from(jsonDecode(releaseResponse.body) as Map);
+      final releaseMap = Map<String, dynamic>.from(
+        jsonDecode(releaseResponse.body) as Map,
+      );
       return parseGithubRelease(releaseMap);
     }
 
@@ -1902,8 +1969,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     setState(() {
       updateSource = 'Fallback';
     });
-    final fallbackMap =
-        Map<String, dynamic>.from(jsonDecode(fallbackResponse.body) as Map);
+    final fallbackMap = Map<String, dynamic>.from(
+      jsonDecode(fallbackResponse.body) as Map,
+    );
     final manifest = UpdateManifest.fromJson(fallbackMap);
     if (manifest.version.isEmpty || manifest.apkUrl.isEmpty) {
       throw Exception('Fallback update.json ist unvollstaendig.');
@@ -2001,7 +2069,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
           received += chunk.length;
           sink.add(chunk);
           if (mounted && total > 0) {
-            final progress = ((received / total) * 100).clamp(0, 100).toStringAsFixed(0);
+            final progress = ((received / total) * 100)
+                .clamp(0, 100)
+                .toStringAsFixed(0);
             setState(() {
               updateMessage = 'Update wird heruntergeladen... $progress%';
             });
@@ -2015,7 +2085,8 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
         }
 
         setState(() {
-          updateMessage = 'Download fertig. Android-Installer wird gestartet...';
+          updateMessage =
+              'Download fertig. Android-Installer wird gestartet...';
         });
 
         await updateInstallChannel.invokeMethod('installApk', {
@@ -2122,8 +2193,14 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                       child: data.isWorking
                           ? OutlinedButton.icon(
                               onPressed: isPaused ? resumeTracking : startPause,
-                              icon: Icon(isPaused ? Icons.play_arrow : Icons.free_breakfast),
-                              label: Text(isPaused ? 'Pause beenden' : 'Pause starten'),
+                              icon: Icon(
+                                isPaused
+                                    ? Icons.play_arrow
+                                    : Icons.free_breakfast,
+                              ),
+                              label: Text(
+                                isPaused ? 'Pause beenden' : 'Pause starten',
+                              ),
                             )
                           : const SizedBox.shrink(),
                     ),
@@ -2162,7 +2239,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('App-Update', style: Theme.of(context).textTheme.titleLarge),
+                Text(
+                  'App-Update',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
                 if (updateSource != null) ...[
                   const SizedBox(height: 4),
                   Row(
@@ -2177,10 +2257,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                       const SizedBox(width: 6),
                       Text(
                         'Quelle: ${updateSource == 'GitHub' ? 'GitHub Releases API' : 'Fallback update.json'}',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.grey[700],
-                        ),
+                        style: TextStyle(fontSize: 13, color: Colors.grey[700]),
                       ),
                     ],
                   ),
@@ -2196,9 +2273,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                       child: FilledButton.icon(
                         onPressed: checkingUpdate ? null : checkForUpdate,
                         icon: const Icon(Icons.system_update_alt),
-                        label: Text(checkingUpdate
-                            ? 'Pruefe...'
-                            : 'Nach Update suchen'),
+                        label: Text(
+                          checkingUpdate ? 'Pruefe...' : 'Nach Update suchen',
+                        ),
                       ),
                     ),
                   ],
@@ -2212,9 +2289,11 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                             ? null
                             : installAvailableUpdate,
                         icon: const Icon(Icons.download),
-                        label: Text(installingUpdate
-                            ? 'Installiere...'
-                            : 'Update installieren'),
+                        label: Text(
+                          installingUpdate
+                              ? 'Installiere...'
+                              : 'Update installieren',
+                        ),
                       ),
                     ),
                   ],
@@ -2254,7 +2333,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Monatsuebersicht', style: Theme.of(context).textTheme.titleLarge),
+                Text(
+                  'Monatsuebersicht',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
                 const SizedBox(height: 8),
                 Text('Soll: ${formatDuration(data.monthTarget)}'),
                 Text('Ist: ${formatDuration(data.monthWorked)}'),
@@ -2262,7 +2344,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                   data.monthOverUnder.isNegative
                       ? 'Minusstunden: ${formatDuration(data.monthOverUnder)}'
                       : 'Ueberstunden: ${formatDuration(data.monthOverUnder)}',
-                  style: TextStyle(color: monthColor, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                    color: monthColor,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ],
             ),
@@ -2278,10 +2363,15 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     final monthLabel = DateFormat('MMMM yyyy', 'de_DE').format(focusedDay);
     final weekNumbers = weekNumbersForMonth(focusedDay);
 
-    Widget buildDayCell(DateTime day, {bool selected = false, bool today = false}) {
+    Widget buildDayCell(
+      DateTime day, {
+      bool selected = false,
+      bool today = false,
+    }) {
       final type = effectiveDayType(day);
       final baseColor = colorForDayType(type, context);
-      final isWeekend = day.weekday == DateTime.saturday || day.weekday == DateTime.sunday;
+      final isWeekend =
+          day.weekday == DateTime.saturday || day.weekday == DateTime.sunday;
 
       Color backgroundColor;
       Color textColor;
@@ -2297,7 +2387,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
         border = Border.all(color: const Color(0xFF2F80ED), width: 1.2);
       } else if (type == DayType.free) {
         backgroundColor = const Color(0xFF1F2227);
-        textColor = isWeekend ? const Color(0xFFFF5A5F) : Colors.white.withValues(alpha: 0.88);
+        textColor = isWeekend
+            ? const Color(0xFFFF5A5F)
+            : Colors.white.withValues(alpha: 0.88);
         border = Border.all(color: const Color(0xFF2A2F36));
       } else {
         backgroundColor = baseColor.withValues(alpha: 0.12);
@@ -2386,7 +2478,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                       ),
                     ),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
                       decoration: BoxDecoration(
                         color: const Color(0xFF262A30),
                         borderRadius: BorderRadius.circular(999),
@@ -2436,7 +2531,8 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                         firstDay: DateTime(2020, 1, 1),
                         lastDay: DateTime(2100, 12, 31),
                         focusedDay: focusedDay,
-                        selectedDayPredicate: (day) => isSameDay(day, selectedDay),
+                        selectedDayPredicate: (day) =>
+                            isSameDay(day, selectedDay),
                         availableGestures: AvailableGestures.horizontalSwipe,
                         calendarFormat: CalendarFormat.month,
                         sixWeekMonthsEnforced: true,
@@ -2444,13 +2540,16 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                         rowHeight: 52,
                         daysOfWeekHeight: 28,
                         headerVisible: false,
-                        availableCalendarFormats: const {CalendarFormat.month: 'Monat'},
+                        availableCalendarFormats: const {
+                          CalendarFormat.month: 'Monat',
+                        },
                         onDaySelected: (selected, focused) async {
                           setState(() {
                             selectedDay = selected;
                             focusedDay = focused;
                           });
-                          if (templateAssignMode && activeCalendarTemplate != null) {
+                          if (templateAssignMode &&
+                              activeCalendarTemplate != null) {
                             await assignActiveTemplateToDay(selected);
                           }
                         },
@@ -2482,7 +2581,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                           outsideDaysVisible: true,
                           todayDecoration: BoxDecoration(
                             color: const Color(0xFF262A30),
-                            border: Border.all(color: const Color(0xFF2F80ED), width: 1.2),
+                            border: Border.all(
+                              color: const Color(0xFF2F80ED),
+                              width: 1.2,
+                            ),
                             borderRadius: BorderRadius.circular(999),
                           ),
                           selectedDecoration: BoxDecoration(
@@ -2513,7 +2615,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
                           ),
-                          cellMargin: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                          cellMargin: const EdgeInsets.symmetric(
+                            vertical: 4,
+                            horizontal: 2,
+                          ),
                         ),
                         calendarBuilders: CalendarBuilders(
                           defaultBuilder: (context, day, focusedDay) {
@@ -2553,7 +2658,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                             startPause();
                           }
                         },
-                        icon: Icon(isPaused ? Icons.play_arrow : Icons.free_breakfast),
+                        icon: Icon(
+                          isPaused ? Icons.play_arrow : Icons.free_breakfast,
+                        ),
                         label: Text(isPaused ? 'Weiter' : 'Pause'),
                       ),
                     ),
@@ -2579,7 +2686,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                       color: theme.colorScheme.primary.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: theme.colorScheme.primary.withValues(alpha: 0.28),
+                        color: theme.colorScheme.primary.withValues(
+                          alpha: 0.28,
+                        ),
                       ),
                     ),
                     child: Column(
@@ -2592,7 +2701,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                         const SizedBox(height: 6),
                         Text(
                           'Tippe im Kalender auf die gewünschten Tage, um die Vorlage manuell zuzuweisen.',
-                          style: TextStyle(color: Colors.white.withValues(alpha: 0.78)),
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.78),
+                          ),
                         ),
                         const SizedBox(height: 10),
                         SizedBox(
@@ -2641,7 +2752,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Schichtvorlagen', style: Theme.of(context).textTheme.titleMedium),
+                    Text(
+                      'Schichtvorlagen',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
                     IconButton(
                       onPressed: () => showTemplateDialog(),
                       icon: const Icon(Icons.add_circle_outline),
@@ -2656,10 +2770,14 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                       width: double.infinity,
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.primary.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.35),
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.primary.withValues(alpha: 0.35),
                         ),
                       ),
                       child: Row(
@@ -2684,72 +2802,79 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                     padding: EdgeInsets.only(top: 4),
                     child: Text('Noch keine Vorlagen vorhanden.'),
                   ),
-                ...shiftTemplates.asMap().entries.map(
-                  (entry) {
-                    final idx = entry.key;
-                    final template = entry.value;
-                    return ListTile(
-                      dense: true,
-                      title: Text(template.name),
-                      subtitle: Text(
-                        '${formatTimeOfDay(template.start)} - ${formatTimeOfDay(template.end)}',
-                      ),
-                      trailing: Wrap(
-                        spacing: 8,
-                        children: [
-                          IconButton(
-                            onPressed: () {
-                              if (templateAssignMode && activeCalendarTemplate == template) {
-                                stopTemplateAssignMode();
-                              } else {
-                                activateTemplateAssignMode(template);
-                              }
-                            },
-                            icon: Icon(
-                              templateAssignMode && activeCalendarTemplate == template
-                                  ? Icons.check_circle
-                                  : Icons.edit_calendar_outlined,
-                            ),
-                            tooltip: templateAssignMode && activeCalendarTemplate == template
-                                ? 'Editiermodus beenden'
-                                : 'Im Kalender zuweisen',
+                ...shiftTemplates.asMap().entries.map((entry) {
+                  final idx = entry.key;
+                  final template = entry.value;
+                  return ListTile(
+                    dense: true,
+                    title: Text(template.name),
+                    subtitle: Text(
+                      '${formatTimeOfDay(template.start)} - ${formatTimeOfDay(template.end)}',
+                    ),
+                    trailing: Wrap(
+                      spacing: 8,
+                      children: [
+                        IconButton(
+                          onPressed: () {
+                            if (templateAssignMode &&
+                                activeCalendarTemplate == template) {
+                              stopTemplateAssignMode();
+                            } else {
+                              activateTemplateAssignMode(template);
+                            }
+                          },
+                          icon: Icon(
+                            templateAssignMode &&
+                                    activeCalendarTemplate == template
+                                ? Icons.check_circle
+                                : Icons.edit_calendar_outlined,
                           ),
-                          IconButton(
-                            onPressed: () => showTemplateDialog(template: template, index: idx),
-                            icon: const Icon(Icons.edit_outlined),
-                            tooltip: 'Vorlage bearbeiten',
+                          tooltip:
+                              templateAssignMode &&
+                                  activeCalendarTemplate == template
+                              ? 'Editiermodus beenden'
+                              : 'Im Kalender zuweisen',
+                        ),
+                        IconButton(
+                          onPressed: () => showTemplateDialog(
+                            template: template,
+                            index: idx,
                           ),
-                          IconButton(
-                            onPressed: () async {
-                              await addShiftFromTemplate(template, selectedDay);
-                              if (mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      'Vorlage "${template.name}" auf ${DateFormat('dd.MM.yyyy').format(selectedDay)} angewendet.',
-                                    ),
+                          icon: const Icon(Icons.edit_outlined),
+                          tooltip: 'Vorlage bearbeiten',
+                        ),
+                        IconButton(
+                          onPressed: () async {
+                            await addShiftFromTemplate(template, selectedDay);
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Vorlage "${template.name}" auf ${DateFormat('dd.MM.yyyy').format(selectedDay)} angewendet.',
                                   ),
-                                );
-                              }
-                            },
-                            icon: const Icon(Icons.playlist_add_check_circle_outlined),
-                            tooltip: 'Auf ausgewählten Tag anwenden',
+                                ),
+                              );
+                            }
+                          },
+                          icon: const Icon(
+                            Icons.playlist_add_check_circle_outlined,
                           ),
-                          IconButton(
-                            onPressed: () async {
-                              setState(() {
-                                shiftTemplates.removeAt(idx);
-                              });
-                              await persistState();
-                            },
-                            icon: const Icon(Icons.delete_outline),
-                            tooltip: 'Vorlage löschen',
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
+                          tooltip: 'Auf ausgewählten Tag anwenden',
+                        ),
+                        IconButton(
+                          onPressed: () async {
+                            setState(() {
+                              shiftTemplates.removeAt(idx);
+                            });
+                            await persistState();
+                          },
+                          icon: const Icon(Icons.delete_outline),
+                          tooltip: 'Vorlage löschen',
+                        ),
+                      ],
+                    ),
+                  );
+                }),
               ],
             ),
           ),
@@ -2777,16 +2902,20 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                     value: selectedTemplate,
                     hint: const Text('Vorlage wählen'),
                     items: shiftTemplates
-                        .map((template) => DropdownMenuItem(
-                              value: template,
-                              child: Text(template.name),
-                            ))
+                        .map(
+                          (template) => DropdownMenuItem(
+                            value: template,
+                            child: Text(template.name),
+                          ),
+                        )
                         .toList(),
                     onChanged: (template) {
                       setState(() {
                         selectedTemplate = template;
                         if (template != null) {
-                          startController.text = formatTimeOfDay(template.start);
+                          startController.text = formatTimeOfDay(
+                            template.start,
+                          );
                           endController.text = formatTimeOfDay(template.end);
                         }
                       });
@@ -2794,12 +2923,16 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                   ),
                   TextField(
                     controller: startController,
-                    decoration: const InputDecoration(labelText: 'Start (HH:mm)'),
+                    decoration: const InputDecoration(
+                      labelText: 'Start (HH:mm)',
+                    ),
                     keyboardType: TextInputType.datetime,
                   ),
                   TextField(
                     controller: endController,
-                    decoration: const InputDecoration(labelText: 'Ende (HH:mm)'),
+                    decoration: const InputDecoration(
+                      labelText: 'Ende (HH:mm)',
+                    ),
                     keyboardType: TextInputType.datetime,
                   ),
                 ],
@@ -2833,7 +2966,14 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                       }
                       final anwesenheit = end.difference(start);
                       final pausedDuration = legalBreakDeduction(anwesenheit);
-                      Navigator.pop(context, WorkSession(start: start, end: end, pausedDuration: pausedDuration));
+                      Navigator.pop(
+                        context,
+                        WorkSession(
+                          start: start,
+                          end: end,
+                          pausedDuration: pausedDuration,
+                        ),
+                      );
                     }
                   },
                   child: const Text('Speichern'),
@@ -2876,10 +3016,17 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Statistiken', style: Theme.of(context).textTheme.titleLarge),
+                Text(
+                  'Statistiken',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
                 const SizedBox(height: 8),
-                Text('Durchschnittlicher Arbeitstag: ${formatDuration(stats.averageWorkDay)}'),
-                Text('Laengster Arbeitstag: ${formatDuration(stats.longestDay)}'),
+                Text(
+                  'Durchschnittlicher Arbeitstag: ${formatDuration(stats.averageWorkDay)}',
+                ),
+                Text(
+                  'Laengster Arbeitstag: ${formatDuration(stats.longestDay)}',
+                ),
                 Text(
                   stats.monthOvertime.isNegative
                       ? 'Minusstunden im Monat: ${formatDuration(stats.monthOvertime)}'
@@ -2907,8 +3054,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Arbeitszeit nach Wochentag',
-                    style: Theme.of(context).textTheme.titleLarge),
+                Text(
+                  'Arbeitszeit nach Wochentag',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
                 const SizedBox(height: 8),
                 ...weekdayLabels.entries.map(
                   (entry) => Padding(
@@ -2917,7 +3066,11 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(entry.value),
-                        Text(formatDuration(stats.byWeekday[entry.key] ?? Duration.zero)),
+                        Text(
+                          formatDuration(
+                            stats.byWeekday[entry.key] ?? Duration.zero,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -2939,13 +3092,17 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
             children: [
               ListTile(
                 title: const Text('Monatliche Sollstunden'),
-                subtitle: Text('${settings.monthlyTargetHours.toStringAsFixed(1)} h'),
+                subtitle: Text(
+                  '${settings.monthlyTargetHours.toStringAsFixed(1)} h',
+                ),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: editMonthlyTargetHours,
               ),
               ListTile(
                 title: const Text('Tägliche Sollstunden'),
-                subtitle: Text('${settings.dailyTargetHours.toStringAsFixed(1)} h'),
+                subtitle: Text(
+                  '${settings.dailyTargetHours.toStringAsFixed(1)} h',
+                ),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: editDailyTargetHours,
               ),
@@ -3029,9 +3186,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   @override
   Widget build(BuildContext context) {
     if (loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     final tabs = [
@@ -3042,9 +3197,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     ];
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Arbeitszeit'),
-      ),
+      appBar: AppBar(title: const Text('Arbeitszeit')),
       body: tabs[currentTab],
       bottomNavigationBar: NavigationBar(
         selectedIndex: currentTab,
@@ -3055,12 +3208,17 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
         },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.timelapse), label: 'Heute'),
-          NavigationDestination(icon: Icon(Icons.calendar_month), label: 'Kalender'),
+          NavigationDestination(
+            icon: Icon(Icons.calendar_month),
+            label: 'Kalender',
+          ),
           NavigationDestination(icon: Icon(Icons.bar_chart), label: 'Stats'),
-          NavigationDestination(icon: Icon(Icons.settings), label: 'Einstellungen'),
+          NavigationDestination(
+            icon: Icon(Icons.settings),
+            label: 'Einstellungen',
+          ),
         ],
       ),
     );
   }
 }
-
