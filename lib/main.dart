@@ -21,8 +21,14 @@ class ShiftTemplate {
   final String name;
   final TimeOfDay start;
   final TimeOfDay end;
+  final int colorValue;
 
-  ShiftTemplate({required this.name, required this.start, required this.end});
+  ShiftTemplate({
+    required this.name,
+    required this.start,
+    required this.end,
+    this.colorValue = 0xFFF5207B,
+  });
 
   Map<String, dynamic> toJson() => {
     'name': name,
@@ -30,6 +36,7 @@ class ShiftTemplate {
         '${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')}',
     'end':
         '${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}',
+    'color_value': colorValue,
   };
 
   static ShiftTemplate fromJson(Map<String, dynamic> json) {
@@ -45,6 +52,7 @@ class ShiftTemplate {
         hour: int.parse(endParts[0]),
         minute: int.parse(endParts[1]),
       ),
+      colorValue: (json['color_value'] as num?)?.toInt() ?? 0xFFF5207B,
     );
   }
 }
@@ -87,6 +95,7 @@ class PlannedShift {
     required this.start,
     required this.end,
     required this.name,
+    this.colorValue = 0xFFF5207B,
     this.pausedDuration = Duration.zero,
   });
 
@@ -94,6 +103,7 @@ class PlannedShift {
   final DateTime start;
   final DateTime end;
   final String name;
+  final int colorValue;
   final Duration pausedDuration;
 
   Duration get duration => end.difference(start) - pausedDuration;
@@ -104,6 +114,7 @@ class PlannedShift {
       'start': start.toIso8601String(),
       'end': end.toIso8601String(),
       'name': name,
+      'color_value': colorValue,
       'paused_seconds': pausedDuration.inSeconds,
     };
   }
@@ -114,6 +125,7 @@ class PlannedShift {
       start: DateTime.parse(json['start'] as String),
       end: DateTime.parse(json['end'] as String),
       name: (json['name'] as String? ?? '').trim(),
+      colorValue: (json['color_value'] as num?)?.toInt() ?? 0xFFF5207B,
       pausedDuration: Duration(
         seconds: (json['paused_seconds'] as num?)?.toInt() ?? 0,
       ),
@@ -622,6 +634,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   UpdateManifest? availableUpdate;
   String? updateSource; // 'GitHub' or 'Fallback'
   bool templateAssignMode = false;
+  bool deleteAssignMode = false;
   ShiftTemplate? activeCalendarTemplate;
   StreamSubscription<Uri?>? widgetClickSubscription;
   Uri? pendingWidgetUri;
@@ -1332,7 +1345,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   }
 
   Future<void> deleteEntriesForSelectedDay() async {
-    final day = selectedDay;
+    await deleteEntriesForDay(selectedDay);
+  }
+
+  Future<void> deleteEntriesForDay(DateTime day) async {
     final key = dayKey(day);
     setState(() {
       plannedShifts.remove(key);
@@ -1365,8 +1381,72 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     return '$hour:$minute';
   }
 
+  static const List<int> shiftColorPalette = [
+    0xFFF44336,
+    0xFFE91E63,
+    0xFF9C27B0,
+    0xFF673AB7,
+    0xFF3F51B5,
+    0xFF2196F3,
+    0xFF03A9F4,
+    0xFF00BCD4,
+    0xFF009688,
+    0xFF4CAF50,
+    0xFF8BC34A,
+    0xFFCDDC39,
+    0xFFFFEB3B,
+    0xFFFFC107,
+    0xFFFF9800,
+    0xFFFF5722,
+    0xFF795548,
+    0xFF607D8B,
+    0xFF1ABC9C,
+    0xFF16A085,
+    0xFF27AE60,
+    0xFF2ECC71,
+    0xFF2980B9,
+    0xFF3498DB,
+    0xFF8E44AD,
+    0xFF9B59B6,
+    0xFFD35400,
+    0xFFE67E22,
+    0xFFC0392B,
+    0xFFE74C3C,
+  ];
+
+  Widget buildColorChoiceDot({
+    required int colorValue,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: Color(colorValue),
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: selected ? Colors.white : Colors.black26,
+            width: selected ? 2.5 : 1,
+          ),
+          boxShadow: selected
+              ? const [
+                  BoxShadow(
+                    color: Colors.black26,
+                    blurRadius: 4,
+                    offset: Offset(0, 2),
+                  ),
+                ]
+              : null,
+        ),
+      ),
+    );
+  }
+
   TimeOfDay? parseTimeInput(String input) {
-    final normalized = input.trim().replaceAll('.', ':');
+    final normalized = normalizeTimeText(input);
     final parts = normalized.split(':');
     if (parts.length != 2) {
       return null;
@@ -1381,6 +1461,44 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       return null;
     }
     return TimeOfDay(hour: hour, minute: minute);
+  }
+
+  String normalizeTimeText(String raw) {
+    final cleaned = raw.trim().replaceAll(RegExp(r'[^0-9:]'), '');
+    if (cleaned.isEmpty) {
+      return '';
+    }
+
+    if (cleaned.contains(':')) {
+      final idx = cleaned.indexOf(':');
+      final left = cleaned.substring(0, idx).replaceAll(':', '');
+      final right = cleaned.substring(idx + 1).replaceAll(':', '');
+      final hh = left.length > 2 ? left.substring(0, 2) : left;
+      final mm = right.length > 2 ? right.substring(0, 2) : right;
+      return '$hh:$mm';
+    }
+
+    final digits = cleaned;
+    if (digits.length <= 2) {
+      return digits;
+    }
+    if (digits.length == 3) {
+      return '${digits.substring(0, 1)}:${digits.substring(1)}';
+    }
+    final limited = digits.substring(0, 4);
+    return '${limited.substring(0, 2)}:${limited.substring(2)}';
+  }
+
+  void applyNormalizedTimeInput(TextEditingController controller, String raw) {
+    final normalized = normalizeTimeText(raw);
+    if (controller.text == normalized) {
+      return;
+    }
+
+    controller.value = TextEditingValue(
+      text: normalized,
+      selection: TextSelection.collapsed(offset: normalized.length),
+    );
   }
 
   /// Berechnet den gesetzlichen Pausenabzug nach ArbZG §4:
@@ -1426,6 +1544,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
         start: start,
         end: end,
         name: template.name,
+        colorValue: template.colorValue,
         pausedDuration: pausedDuration,
       );
       syncWorkedDayType(day);
@@ -1436,8 +1555,17 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
 
   void activateTemplateAssignMode(ShiftTemplate template) {
     setState(() {
+      deleteAssignMode = false;
       templateAssignMode = true;
       activeCalendarTemplate = template;
+    });
+  }
+
+  void activateDeleteAssignMode() {
+    setState(() {
+      deleteAssignMode = true;
+      templateAssignMode = false;
+      activeCalendarTemplate = null;
     });
   }
 
@@ -1445,6 +1573,12 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     setState(() {
       templateAssignMode = false;
       activeCalendarTemplate = null;
+    });
+  }
+
+  void stopDeleteAssignMode() {
+    setState(() {
+      deleteAssignMode = false;
     });
   }
 
@@ -1475,56 +1609,144 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     final endController = TextEditingController(
       text: template == null ? '16:00' : formatTimeOfDay(template.end),
     );
+    var selectedColorValue = template?.colorValue ?? 0xFFF5207B;
+    var showValidation = false;
 
     final result = await showDialog<ShiftTemplate>(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: Text(
-            template == null ? 'Vorlage erstellen' : 'Vorlage bearbeiten',
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Name (z.B. Frühschicht)',
+        return StatefulBuilder(
+          builder: (context, setState) {
+            final startInvalid =
+                startController.text.trim().isNotEmpty &&
+                parseTimeInput(startController.text) == null;
+            final endInvalid =
+                endController.text.trim().isNotEmpty &&
+                parseTimeInput(endController.text) == null;
+            return AlertDialog(
+              title: Text(
+                template == null ? 'Vorlage erstellen' : 'Vorlage bearbeiten',
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: nameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Name (z.B. Frühschicht)',
+                      ),
+                    ),
+                    TextField(
+                      controller: startController,
+                      decoration: InputDecoration(
+                        labelText: 'Start (HH:mm)',
+                        errorText: showValidation && startInvalid
+                            ? 'Ungültige Zeit (24h, z.B. 08:30)'
+                            : null,
+                      ),
+                      keyboardType: TextInputType.text,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(
+                          RegExp(r'[0-9:]'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        applyNormalizedTimeInput(startController, value);
+                        setState(() {});
+                      },
+                    ),
+                    TextField(
+                      controller: endController,
+                      decoration: InputDecoration(
+                        labelText: 'Ende (HH:mm)',
+                        errorText: showValidation && endInvalid
+                            ? 'Ungültige Zeit (24h, z.B. 17:45)'
+                            : null,
+                      ),
+                      keyboardType: TextInputType.text,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(
+                          RegExp(r'[0-9:]'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        applyNormalizedTimeInput(endController, value);
+                        setState(() {});
+                      },
+                    ),
+                    const SizedBox(height: 6),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Bitte 24h-Format nutzen (z.B. 15:30). Tipp: 1530 wird automatisch zu 15:30.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(
+                            context,
+                          ).textTheme.bodySmall?.color?.withValues(alpha: 0.8),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Farbe',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: shiftColorPalette
+                          .map(
+                            (color) => buildColorChoiceDot(
+                              colorValue: color,
+                              selected: selectedColorValue == color,
+                              onTap: () {
+                                setState(() {
+                                  selectedColorValue = color;
+                                });
+                              },
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ],
                 ),
               ),
-              TextField(
-                controller: startController,
-                decoration: const InputDecoration(labelText: 'Start (HH:mm)'),
-                keyboardType: TextInputType.datetime,
-              ),
-              TextField(
-                controller: endController,
-                decoration: const InputDecoration(labelText: 'Ende (HH:mm)'),
-                keyboardType: TextInputType.datetime,
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Abbrechen'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final name = nameController.text.trim();
-                final start = parseTimeInput(startController.text);
-                final end = parseTimeInput(endController.text);
-                if (name.isEmpty || start == null || end == null) {
-                  return;
-                }
-                Navigator.pop(
-                  context,
-                  ShiftTemplate(name: name, start: start, end: end),
-                );
-              },
-              child: const Text('Speichern'),
-            ),
-          ],
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Abbrechen'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    showValidation = true;
+                    final name = nameController.text.trim();
+                    final start = parseTimeInput(startController.text);
+                    final end = parseTimeInput(endController.text);
+                    setState(() {});
+                    if (name.isEmpty || start == null || end == null) {
+                      return;
+                    }
+                    Navigator.pop(
+                      context,
+                      ShiftTemplate(
+                        name: name,
+                        start: start,
+                        end: end,
+                        colorValue: selectedColorValue,
+                      ),
+                    );
+                  },
+                  child: const Text('Speichern'),
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -2348,7 +2570,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
             if (plannedShift != null)
               ListTile(
                 contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.event_note),
+                leading: Icon(
+                  Icons.event_note,
+                  color: Color(plannedShift.colorValue),
+                ),
                 title: Text(plannedShift.name),
                 subtitle: Text(
                   '${formatTimeOfDay(TimeOfDay.fromDateTime(plannedShift.start))} - ${formatTimeOfDay(TimeOfDay.fromDateTime(plannedShift.end))} · ${formatDuration(plannedShift.duration)}',
@@ -2411,10 +2636,23 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       child: Row(
         children: [
           actionButton(
-            onPressed: deleteEntriesForSelectedDay,
-            backgroundColor: const Color(0xFFEEF2F6),
-            borderColor: const Color(0xFFBFC7D1),
-            child: const Icon(Icons.delete_outline, color: Colors.black87),
+            onPressed: () {
+              if (deleteAssignMode) {
+                stopDeleteAssignMode();
+              } else {
+                activateDeleteAssignMode();
+              }
+            },
+            backgroundColor: deleteAssignMode
+                ? const Color(0xFFC62828)
+                : const Color(0xFFEEF2F6),
+            borderColor: deleteAssignMode
+                ? const Color(0xFFFF8A80)
+                : const Color(0xFFBFC7D1),
+            child: Icon(
+              deleteAssignMode ? Icons.delete_forever : Icons.delete_outline,
+              color: deleteAssignMode ? Colors.white : Colors.black87,
+            ),
           ),
           const SizedBox(width: 8),
           actionButton(
@@ -2458,7 +2696,14 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
           ),
           const SizedBox(width: 8),
           actionButton(
-            onPressed: templateAssignMode ? stopTemplateAssignMode : () {},
+            onPressed: () {
+              if (templateAssignMode) {
+                stopTemplateAssignMode();
+              }
+              if (deleteAssignMode) {
+                stopDeleteAssignMode();
+              }
+            },
             backgroundColor: const Color(0xFF2F80ED),
             borderColor: const Color(0xFF58A7FF),
             child: const Icon(Icons.check_circle_outline),
@@ -2868,7 +3113,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                   padding: const EdgeInsets.symmetric(horizontal: 3),
                   decoration: BoxDecoration(
                     color: hasPlannedShift
-                        ? const Color(0xFFF5207B).withValues(alpha: 0.82)
+                        ? Color(
+                            plannedShift!.colorValue,
+                          ).withValues(alpha: 0.82)
                         : Colors.green.withValues(alpha: 0.68),
                     borderRadius: BorderRadius.circular(5),
                     border: Border.all(
@@ -3039,6 +3286,19 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                             selectedDay = selected;
                             focusedDay = focused;
                           });
+                          if (deleteAssignMode) {
+                            await deleteEntriesForDay(selected);
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Einträge am ${DateFormat('dd.MM.yyyy').format(selected)} gelöscht.',
+                                  ),
+                                ),
+                              );
+                            }
+                            return;
+                          }
                           if (templateAssignMode &&
                               activeCalendarTemplate != null) {
                             await assignActiveTemplateToDay(selected);
@@ -3168,6 +3428,35 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                     ),
                   ],
                 ),
+                if (deleteAssignMode) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: Colors.red.withValues(alpha: 0.35),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.delete_forever),
+                        const SizedBox(width: 10),
+                        const Expanded(
+                          child: Text(
+                            'Löschmodus aktiv. Tippe Tage im Kalender an, um deren Einträge zu löschen.',
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: stopDeleteAssignMode,
+                          child: const Text('Beenden'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 if (templateAssignMode && activeCalendarTemplate != null) ...[
                   const SizedBox(height: 8),
                   Container(
@@ -3289,6 +3578,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                   final template = entry.value;
                   return ListTile(
                     dense: true,
+                    leading: CircleAvatar(
+                      radius: 9,
+                      backgroundColor: Color(template.colorValue),
+                    ),
                     title: Text(template.name),
                     subtitle: Text(
                       '${formatTimeOfDay(template.start)} - ${formatTimeOfDay(template.end)}',
@@ -3378,58 +3671,138 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   }
 
   Future<void> _showShiftDialog(BuildContext context, DateTime day) async {
+    final nameController = TextEditingController(text: 'Schicht');
     final startController = TextEditingController();
     final endController = TextEditingController();
     ShiftTemplate? selectedTemplate;
+    var selectedColorValue = 0xFFF5207B;
+    var showValidation = false;
 
-    final result = await showDialog<WorkSession>(
+    final result = await showDialog<PlannedShift>(
       context: context,
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setState) {
+            final startInvalid =
+                startController.text.trim().isNotEmpty &&
+                parseTimeInput(startController.text) == null;
+            final endInvalid =
+                endController.text.trim().isNotEmpty &&
+                parseTimeInput(endController.text) == null;
             return AlertDialog(
               title: const Text('Schicht eintragen'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  DropdownButtonFormField<ShiftTemplate>(
-                    value: selectedTemplate,
-                    hint: const Text('Vorlage wählen'),
-                    items: shiftTemplates
-                        .map(
-                          (template) => DropdownMenuItem(
-                            value: template,
-                            child: Text(template.name),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (template) {
-                      setState(() {
-                        selectedTemplate = template;
-                        if (template != null) {
-                          startController.text = formatTimeOfDay(
-                            template.start,
-                          );
-                          endController.text = formatTimeOfDay(template.end);
-                        }
-                      });
-                    },
-                  ),
-                  TextField(
-                    controller: startController,
-                    decoration: const InputDecoration(
-                      labelText: 'Start (HH:mm)',
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<ShiftTemplate>(
+                      value: selectedTemplate,
+                      hint: const Text('Vorlage wählen'),
+                      items: shiftTemplates
+                          .map(
+                            (template) => DropdownMenuItem(
+                              value: template,
+                              child: Text(template.name),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (template) {
+                        setState(() {
+                          selectedTemplate = template;
+                          if (template != null) {
+                            nameController.text = template.name;
+                            startController.text = formatTimeOfDay(
+                              template.start,
+                            );
+                            endController.text = formatTimeOfDay(template.end);
+                            selectedColorValue = template.colorValue;
+                          }
+                        });
+                      },
                     ),
-                    keyboardType: TextInputType.datetime,
-                  ),
-                  TextField(
-                    controller: endController,
-                    decoration: const InputDecoration(
-                      labelText: 'Ende (HH:mm)',
+                    TextField(
+                      controller: nameController,
+                      decoration: const InputDecoration(labelText: 'Name'),
                     ),
-                    keyboardType: TextInputType.datetime,
-                  ),
-                ],
+                    TextField(
+                      controller: startController,
+                      decoration: InputDecoration(
+                        labelText: 'Start (HH:mm)',
+                        errorText: showValidation && startInvalid
+                            ? 'Ungültige Zeit (24h, z.B. 08:30)'
+                            : null,
+                      ),
+                      keyboardType: TextInputType.text,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(
+                          RegExp(r'[0-9:]'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        applyNormalizedTimeInput(startController, value);
+                        setState(() {});
+                      },
+                    ),
+                    TextField(
+                      controller: endController,
+                      decoration: InputDecoration(
+                        labelText: 'Ende (HH:mm)',
+                        errorText: showValidation && endInvalid
+                            ? 'Ungültige Zeit (24h, z.B. 17:45)'
+                            : null,
+                      ),
+                      keyboardType: TextInputType.text,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(
+                          RegExp(r'[0-9:]'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        applyNormalizedTimeInput(endController, value);
+                        setState(() {});
+                      },
+                    ),
+                    const SizedBox(height: 6),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Bitte 24h-Format nutzen (z.B. 15:30). Tipp: 1530 wird automatisch zu 15:30.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(
+                            context,
+                          ).textTheme.bodySmall?.color?.withValues(alpha: 0.8),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Farbe',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: shiftColorPalette
+                          .map(
+                            (color) => buildColorChoiceDot(
+                              colorValue: color,
+                              selected: selectedColorValue == color,
+                              onTap: () {
+                                setState(() {
+                                  selectedColorValue = color;
+                                });
+                              },
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ],
+                ),
               ),
               actions: [
                 TextButton(
@@ -3438,9 +3811,14 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                 ),
                 FilledButton(
                   onPressed: () {
+                    showValidation = true;
+                    final name = nameController.text.trim();
                     final startTime = parseTimeInput(startController.text);
                     final endTime = parseTimeInput(endController.text);
-                    if (startTime != null && endTime != null) {
+                    setState(() {});
+                    if (name.isNotEmpty &&
+                        startTime != null &&
+                        endTime != null) {
                       final start = DateTime(
                         day.year,
                         day.month,
@@ -3462,9 +3840,12 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                       final pausedDuration = legalBreakDeduction(anwesenheit);
                       Navigator.pop(
                         context,
-                        WorkSession(
+                        PlannedShift(
+                          day: DateTime(day.year, day.month, day.day),
                           start: start,
                           end: end,
+                          name: name,
+                          colorValue: selectedColorValue,
                           pausedDuration: pausedDuration,
                         ),
                       );
@@ -3480,8 +3861,8 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     );
     if (result != null) {
       setState(() {
-        sessions.insert(0, result);
-        dayTypes[dayKey(day)] = DayType.worked;
+        plannedShifts[dayKey(day)] = result;
+        syncWorkedDayType(day);
       });
       await persistState();
       await syncWidgetData();
