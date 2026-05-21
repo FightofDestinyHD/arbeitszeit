@@ -168,7 +168,9 @@ CalendarEntryCollections removeSessionEntryFromCollections({
   final hasSession = updatedSessions.any(
     (candidate) => calendarSameDay(candidate.start, session.start),
   );
-  if (!hasPlannedShift && !hasSession && updatedDayTypes[key] == DayType.worked) {
+  if (!hasPlannedShift &&
+      !hasSession &&
+      updatedDayTypes[key] == DayType.worked) {
     updatedDayTypes.remove(key);
   }
 
@@ -193,8 +195,12 @@ CalendarEntryCollections removePlannedShiftEntryFromCollections({
   updatedPlannedShifts.remove(key);
 
   final hasPlannedShift = updatedPlannedShifts.containsKey(key);
-  final hasSession = updatedSessions.any((candidate) => calendarSameDay(candidate.start, day));
-  if (!hasPlannedShift && !hasSession && updatedDayTypes[key] == DayType.worked) {
+  final hasSession = updatedSessions.any(
+    (candidate) => calendarSameDay(candidate.start, day),
+  );
+  if (!hasPlannedShift &&
+      !hasSession &&
+      updatedDayTypes[key] == DayType.worked) {
     updatedDayTypes.remove(key);
   }
 
@@ -1323,6 +1329,18 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     await syncWidgetData();
   }
 
+  Future<void> deleteEntriesForSelectedDay() async {
+    final day = selectedDay;
+    final key = dayKey(day);
+    setState(() {
+      plannedShifts.remove(key);
+      sessions.removeWhere((session) => isSameDay(session.start, day));
+      syncWorkedDayType(day);
+    });
+    await persistState();
+    await syncWidgetData();
+  }
+
   void removeSessionForDayLocal(WorkSession session) {
     final day = session.start;
     setState(() {
@@ -2358,6 +2376,165 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     );
   }
 
+  Widget buildCalendarQuickActions() {
+    Widget actionButton({
+      required VoidCallback onPressed,
+      required Widget child,
+      Color? backgroundColor,
+      Color? borderColor,
+      bool compact = false,
+    }) {
+      return SizedBox(
+        height: compact ? 40 : 56,
+        child: OutlinedButton(
+          style: OutlinedButton.styleFrom(
+            backgroundColor: backgroundColor ?? const Color(0xFF26303A),
+            foregroundColor: Colors.white,
+            side: BorderSide(color: borderColor ?? const Color(0xFF3D4955)),
+            padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          onPressed: onPressed,
+          child: child,
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          actionButton(
+            onPressed: deleteEntriesForSelectedDay,
+            backgroundColor: const Color(0xFFEEF2F6),
+            borderColor: const Color(0xFFBFC7D1),
+            child: const Icon(Icons.delete_outline, color: Colors.black87),
+          ),
+          const SizedBox(width: 8),
+          actionButton(
+            onPressed: () => setSelectedDayType(DayType.worked),
+            backgroundColor: const Color(0xFF2D7E64),
+            borderColor: const Color(0xFF2D7E64),
+            child: const Text(
+              'ARB',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+          const SizedBox(width: 8),
+          actionButton(
+            onPressed: () => setSelectedDayType(DayType.vacation),
+            backgroundColor: const Color(0xFF4A3C67),
+            borderColor: const Color(0xFF4A3C67),
+            child: const Text(
+              'U',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+          const SizedBox(width: 8),
+          actionButton(
+            onPressed: () => setSelectedDayType(DayType.sick),
+            backgroundColor: const Color(0xFF6A4D75),
+            borderColor: const Color(0xFF6A4D75),
+            child: const Text(
+              'K',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+          const SizedBox(width: 8),
+          actionButton(
+            onPressed: () => setSelectedDayType(DayType.free),
+            backgroundColor: const Color(0xFF506270),
+            borderColor: const Color(0xFF506270),
+            child: const Text(
+              'FREI',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+          const SizedBox(width: 8),
+          actionButton(
+            onPressed: templateAssignMode ? stopTemplateAssignMode : () {},
+            backgroundColor: const Color(0xFF2F80ED),
+            borderColor: const Color(0xFF58A7FF),
+            child: const Icon(Icons.check_circle_outline),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget buildTemplateQuickStrip() {
+    if (shiftTemplates.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return SizedBox(
+      height: 92,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: shiftTemplates.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (context, index) {
+          final template = shiftTemplates[index];
+          final isActive =
+              templateAssignMode && activeCalendarTemplate == template;
+          return GestureDetector(
+            onTap: () async {
+              await addShiftFromTemplate(template, selectedDay);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Vorlage "${template.name}" auf ${DateFormat('dd.MM.yyyy').format(selectedDay)} angewendet.',
+                    ),
+                  ),
+                );
+              }
+            },
+            onLongPress: () =>
+                showTemplateDialog(template: template, index: index),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              width: 160,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isActive
+                    ? const Color(0xFFF5207B)
+                    : const Color(0xFF4D285A),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: isActive ? Colors.white : const Color(0xFF6E5677),
+                  width: isActive ? 1.4 : 1,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    template.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '${formatTimeOfDay(template.start)} - ${formatTimeOfDay(template.end)}',
+                    style: const TextStyle(fontSize: 14),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   Widget buildOverviewTab() {
     final data = buildOverviewData();
     final monthColor = colorForBalance(data.monthOverUnder, context);
@@ -2588,6 +2765,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     final theme = Theme.of(context);
     final monthLabel = DateFormat('MMMM yyyy', 'de_DE').format(focusedDay);
     final weekNumbers = weekNumbersForMonth(focusedDay);
+    final selectedDuration = plannedDurationForDay(selectedDay) > Duration.zero
+        ? plannedDurationForDay(selectedDay)
+        : actualDurationForDay(selectedDay);
 
     Widget buildDayCell(
       DateTime day, {
@@ -2598,10 +2778,16 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       final baseColor = colorForDayType(type, context);
       final isWeekend =
           day.weekday == DateTime.saturday || day.weekday == DateTime.sunday;
-        final dayKeyValue = dayKey(day);
-        final hasPlannedShift = plannedShifts.containsKey(dayKeyValue);
-        final hasSession = sessions.any((session) => isSameDay(session.start, day));
-        final hasEntry = hasPlannedShift || hasSession;
+      final dayKeyValue = dayKey(day);
+      final plannedShift = plannedShifts[dayKeyValue];
+      final hasPlannedShift = plannedShift != null;
+      final hasSession = sessions.any(
+        (session) => isSameDay(session.start, day),
+      );
+      final hasEntry = hasPlannedShift || hasSession;
+      final plannedBadgeLabel = plannedShift != null
+          ? '${plannedShift.name} ${DateFormat('HH').format(plannedShift.start)}-${DateFormat('HH').format(plannedShift.end)}'
+          : '';
 
       Color backgroundColor;
       Color textColor;
@@ -2633,8 +2819,8 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
           children: [
             AnimatedContainer(
               duration: const Duration(milliseconds: 160),
-              width: 32,
-              height: 24,
+              width: 34,
+              height: 26,
               decoration: BoxDecoration(
                 color: backgroundColor,
                 borderRadius: BorderRadius.circular(999),
@@ -2644,8 +2830,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
               child: Text(
                 '${day.day}',
                 style: TextStyle(
-                  fontWeight:
-                      selected || today ? FontWeight.w700 : FontWeight.w500,
+                  fontWeight: selected || today
+                      ? FontWeight.w700
+                      : FontWeight.w500,
                   color: textColor,
                   fontSize: 12,
                 ),
@@ -2654,15 +2841,37 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
             if (hasEntry)
               Positioned(
                 bottom: 1,
+                left: 1,
+                right: 1,
                 child: Container(
-                  width: 5,
-                  height: 5,
+                  height: 16,
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(horizontal: 3),
                   decoration: BoxDecoration(
                     color: hasPlannedShift
-                        ? const Color(0xFF2F80ED)
-                        : Colors.green,
-                    shape: BoxShape.circle,
+                        ? const Color(0xFFF5207B).withValues(alpha: 0.82)
+                        : Colors.green.withValues(alpha: 0.68),
+                    borderRadius: BorderRadius.circular(5),
+                    border: Border.all(
+                      color: hasPlannedShift
+                          ? Colors.white.withValues(alpha: 0.65)
+                          : Colors.greenAccent.withValues(alpha: 0.6),
+                      width: 0.7,
+                    ),
                   ),
+                  child: hasPlannedShift
+                      ? Text(
+                          plannedBadgeLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 8,
+                            fontWeight: FontWeight.w700,
+                            height: 1,
+                          ),
+                        )
+                      : const Icon(Icons.check, size: 9, color: Colors.black),
                 ),
               ),
           ],
@@ -2729,7 +2938,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                     ),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
+                        horizontal: 12,
                         vertical: 6,
                       ),
                       decoration: BoxDecoration(
@@ -2737,12 +2946,25 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                         borderRadius: BorderRadius.circular(999),
                         border: Border.all(color: const Color(0xFF2F80ED)),
                       ),
-                      child: Text(
-                        DateFormat('dd.MM', 'de_DE').format(selectedDay),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                        ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            formatDuration(selectedDuration),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          Text(
+                            DateFormat('dd.MM', 'de_DE').format(selectedDay),
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.72),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -2787,7 +3009,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                         calendarFormat: CalendarFormat.month,
                         sixWeekMonthsEnforced: true,
                         shouldFillViewport: true,
-                        rowHeight: 52,
+                        rowHeight: 56,
                         daysOfWeekHeight: 28,
                         headerVisible: false,
                         availableCalendarFormats: const {
@@ -2978,22 +3200,11 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
           style: Theme.of(context).textTheme.titleMedium,
         ),
         const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: DayType.values
-              .map(
-                (type) => ChoiceChip(
-                  label: Text(labelForDayType(type)),
-                  selected: selectedType == type,
-                  selectedColor: colorForDayType(type, context).withAlpha(50),
-                  onSelected: (_) => setSelectedDayType(type),
-                ),
-              )
-              .toList(),
-        ),
+        buildCalendarQuickActions(),
         const SizedBox(height: 12),
         buildDayEntriesCard(selectedDay),
+        const SizedBox(height: 12),
+        buildTemplateQuickStrip(),
         const SizedBox(height: 12),
         Card(
           child: Padding(
