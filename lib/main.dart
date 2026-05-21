@@ -222,6 +222,16 @@ Future<void> backgroundCallback(Uri? uri) async {
           'paused_seconds': pauseDur.inSeconds,
         }));
         await prefs.setStringList('work_sessions', sessions);
+
+        final dayTypeRaw = prefs.getString('day_types');
+        final dayTypes = dayTypeRaw == null
+            ? <String, dynamic>{}
+            : Map<String, dynamic>.from(jsonDecode(dayTypeRaw) as Map);
+        final startKey =
+            '${start.year}-${start.month.toString().padLeft(2, '0')}-${start.day.toString().padLeft(2, '0')}';
+        dayTypes[startKey] = 'worked';
+        await prefs.setString('day_types', jsonEncode(dayTypes));
+
         await prefs.remove('active_start');
         await prefs.remove('pause_start');
         await prefs.remove('current_session_paused_seconds');
@@ -289,6 +299,33 @@ Future<void> backgroundCallback(Uri? uri) async {
         break;
       }
     } catch (_) {}
+  }
+
+  if (todayTarget == Duration.zero && today > Duration.zero) {
+    var dailyTargetHours = 8.0;
+    try {
+      final settingsRaw = prefs.getString('app_settings');
+      if (settingsRaw != null) {
+        final settings = Map<String, dynamic>.from(jsonDecode(settingsRaw) as Map);
+        dailyTargetHours = (settings['dailyTargetHours'] as num?)?.toDouble() ?? 8.0;
+      }
+    } catch (_) {}
+
+    var isTargetDay = now.weekday >= DateTime.monday && now.weekday <= DateTime.friday;
+    try {
+      final dayTypesRaw = prefs.getString('day_types');
+      if (dayTypesRaw != null) {
+        final dayTypes = Map<String, dynamic>.from(jsonDecode(dayTypesRaw) as Map);
+        final type = (dayTypes[todayKey] as String?)?.trim();
+        if (type == 'free' || type == 'vacation' || type == 'sick') {
+          isTargetDay = false;
+        }
+      }
+    } catch (_) {}
+
+    if (isTargetDay) {
+      todayTarget = Duration(minutes: (dailyTargetHours * 60).round());
+    }
   }
 
   final hasTodayPlan = todayTarget > Duration.zero;
@@ -809,17 +846,19 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       return;
     }
 
+    final startedAt = activeStart!;
     final end = DateTime.now();
     final pausedDuration = currentSessionPaused + (pauseStart == null ? Duration.zero : end.difference(pauseStart!));
     setState(() {
       sessions.insert(
         0,
         WorkSession(
-          start: activeStart!,
+          start: startedAt,
           end: end,
           pausedDuration: pausedDuration,
         ),
       );
+      dayTypes[dayKey(startedAt)] = DayType.worked;
       activeStart = null;
       pauseStart = null;
       currentSessionPaused = Duration.zero;
@@ -833,7 +872,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   Duration todayDuration() {
     final now = DateTime.now();
     final dayStart = DateTime(now.year, now.month, now.day);
-    return actualDurationForDay(dayStart);
+    return countedWorkDurationForDay(dayStart);
   }
 
   Duration monthDuration(DateTime month, {DateTime? until}) {
@@ -847,7 +886,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
 
     var total = Duration.zero;
     for (var day = firstDay; !day.isAfter(endDay); day = day.add(const Duration(days: 1))) {
-      total += actualDurationForDay(day);
+      total += countedWorkDurationForDay(day);
     }
 
     return total;
@@ -899,6 +938,19 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     if (shift != null) {
       return shift.duration;
     }
+    return Duration.zero;
+  }
+
+  Duration targetDurationForDayBalance(DateTime day, {required Duration worked}) {
+    final planned = plannedDurationForDay(day);
+    if (planned > Duration.zero) {
+      return planned;
+    }
+
+    if (worked > Duration.zero && countsAsTargetWorkday(day)) {
+      return targetPerWorkday(day);
+    }
+
     return Duration.zero;
   }
 
@@ -964,6 +1016,27 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     return total;
   }
 
+  Duration countedWorkDurationForDay(DateTime day) {
+    final worked = actualDurationForDay(day);
+    if (worked <= Duration.zero) {
+      return Duration.zero;
+    }
+
+    if (plannedShifts.containsKey(dayKey(day))) {
+      return worked;
+    }
+
+    if (dayTypes[dayKey(day)] == DayType.worked) {
+      return worked;
+    }
+
+    if (activeStart != null && isSameDay(activeStart!, day)) {
+      return worked;
+    }
+
+    return Duration.zero;
+  }
+
   Duration effectiveMonthTargetDuration(DateTime month, {DateTime? until}) {
     final firstDay = DateTime(month.year, month.month, 1);
     final monthLastDay = DateTime(month.year, month.month + 1, 0);
@@ -983,8 +1056,9 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
   Duration remainingToday() {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final target = plannedDurationForDay(today);
-    final remaining = target - todayDuration();
+    final worked = todayDuration();
+    final target = targetDurationForDayBalance(today, worked: worked);
+    final remaining = target - worked;
     return remaining;
   }
 
@@ -1233,7 +1307,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final todayWorked = todayDuration();
-    final todayTarget = plannedDurationForDay(today);
+    final todayTarget = targetDurationForDayBalance(today, worked: todayWorked);
     final hasTodayPlan = todayTarget > Duration.zero;
     final todayBalance = hasTodayPlan ? todayWorked - todayTarget : Duration.zero;
     final monthWorked = monthDuration(now, until: today);
@@ -1260,7 +1334,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     for (var day = DateTime(now.year, now.month, 1);
         !day.isAfter(today);
         day = day.add(const Duration(days: 1))) {
-      final worked = actualDurationForDay(day);
+      final worked = countedWorkDurationForDay(day);
       if (worked > Duration.zero) {
         byDay[dayKey(day)] = worked;
       }
@@ -1292,7 +1366,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     for (var day = DateTime(now.year, now.month, 1);
         !day.isAfter(today);
         day = day.add(const Duration(days: 1))) {
-      final worked = actualDurationForDay(day);
+      final worked = countedWorkDurationForDay(day);
       if (worked > Duration.zero) {
         byWeekday[day.weekday] =
             (byWeekday[day.weekday] ?? Duration.zero) + worked;
@@ -1326,12 +1400,16 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       final targetDay = countsAsTargetWorkday(normalizedDay);
       final isPast = normalizedDay.isBefore(todayNormalized);
       final planned = plannedDurationForDay(normalizedDay);
-      final worked = actualDurationForDay(normalizedDay);
+      final worked = countedWorkDurationForDay(normalizedDay);
+      final targetForWorked = targetDurationForDayBalance(
+        normalizedDay,
+        worked: worked,
+      );
 
       Duration dayBalance = Duration.zero;
       if (worked > Duration.zero) {
-        dayBalance = worked - planned;
-      } else if (targetDay && isPast) {
+        dayBalance = worked - targetForWorked;
+      } else if (planned > Duration.zero && targetDay && isPast) {
         dayBalance = -planned;
       }
 
