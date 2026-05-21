@@ -503,6 +503,7 @@ class _OverviewData {
     required this.isWorking,
     required this.monthWorked,
     required this.monthTarget,
+    required this.monthPlanned,
     required this.monthOverUnder,
     required this.activeSince,
   });
@@ -514,6 +515,7 @@ class _OverviewData {
   final bool isWorking;
   final Duration monthWorked;
   final Duration monthTarget;
+  final Duration monthPlanned;
   final Duration monthOverUnder;
   final DateTime? activeSince;
 }
@@ -1552,6 +1554,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
         : Duration.zero;
     final monthWorked = monthDurationForOverview(now, until: today);
     final monthTarget = monthlyTargetDuration(now);
+    final monthPlanned = effectiveMonthTargetDuration(now);
 
     return _OverviewData(
       today: todayWorked,
@@ -1561,6 +1564,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       isWorking: activeStart != null,
       monthWorked: monthWorked,
       monthTarget: monthTarget,
+      monthPlanned: monthPlanned,
       monthOverUnder: monthWorked - monthTarget,
       activeSince: activeStart,
     );
@@ -2480,13 +2484,15 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
           final isActive =
               templateAssignMode && activeCalendarTemplate == template;
           return GestureDetector(
-            onTap: () async {
-              await addShiftFromTemplate(template, selectedDay);
-              if (mounted) {
+            onTap: () {
+              if (isActive) {
+                stopTemplateAssignMode();
+              } else {
+                activateTemplateAssignMode(template);
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(
-                      'Vorlage "${template.name}" auf ${DateFormat('dd.MM.yyyy').format(selectedDay)} angewendet.',
+                      'Vorlage "${template.name}" aktiv. Jetzt Tage im Kalender antippen.',
                     ),
                   ),
                 );
@@ -2513,7 +2519,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text(
-                    template.name,
+                    isActive ? '${template.name} (aktiv)' : template.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -2617,11 +2623,23 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
         Row(
           children: [
             Expanded(
-              child: buildBalanceCard(
-                context: context,
-                title: 'Monatsbilanz',
-                balance: data.monthOverUnder,
-                icon: Icons.stacked_line_chart,
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Monatsstand',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 10),
+                      Text('Sollstunden: ${formatDuration(data.monthTarget)}'),
+                      Text('Iststunden: ${formatDuration(data.monthWorked)}'),
+                      Text('Planstunden: ${formatDuration(data.monthPlanned)}'),
+                    ],
+                  ),
+                ),
               ),
             ),
             const SizedBox(width: 12),
@@ -2743,6 +2761,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                 const SizedBox(height: 8),
                 Text('Soll: ${formatDuration(data.monthTarget)}'),
                 Text('Ist: ${formatDuration(data.monthWorked)}'),
+                Text('Plan: ${formatDuration(data.monthPlanned)}'),
                 Text(
                   data.monthOverUnder.isNegative
                       ? 'Minusstunden: ${formatDuration(data.monthOverUnder)}'
@@ -3308,21 +3327,33 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                         ),
                         IconButton(
                           onPressed: () async {
-                            await addShiftFromTemplate(template, selectedDay);
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    'Vorlage "${template.name}" auf ${DateFormat('dd.MM.yyyy').format(selectedDay)} angewendet.',
+                            if (templateAssignMode &&
+                                activeCalendarTemplate == template) {
+                              stopTemplateAssignMode();
+                            } else {
+                              activateTemplateAssignMode(template);
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      'Vorlage "${template.name}" aktiv. Jetzt Tage im Kalender antippen.',
+                                    ),
                                   ),
-                                ),
-                              );
+                                );
+                              }
                             }
                           },
-                          icon: const Icon(
-                            Icons.playlist_add_check_circle_outlined,
+                          icon: Icon(
+                            templateAssignMode &&
+                                    activeCalendarTemplate == template
+                                ? Icons.check_circle
+                                : Icons.touch_app_outlined,
                           ),
-                          tooltip: 'Auf ausgewählten Tag anwenden',
+                          tooltip:
+                              templateAssignMode &&
+                                  activeCalendarTemplate == template
+                              ? 'Editiermodus beenden'
+                              : 'Vorlage auswählen und Tage antippen',
                         ),
                         IconButton(
                           onPressed: () async {

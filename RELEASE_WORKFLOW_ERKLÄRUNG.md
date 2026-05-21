@@ -39,5 +39,10 @@
 - Für signierte APKs oder andere Plattformen kann der Workflow erweitert werden.
 - Die Release-Notes werden aus dem Tag-Text übernommen.
 
+## Versionsregel
+- Bitte beim Versionieren beachten: Nach `x.x.30` wird nicht auf `x.x.31` erhöht, sondern auf `x.2.0` gewechselt.
+- Kurzform: Patch-Level läuft bis `.30`, danach wird die Minor-Version erhöht und der Patch auf `0` zurückgesetzt.
+- Beispiel: `1.1.30 -> 1.2.0`.
+
 ---
 Fragen? Einfach im Code nachschauen oder hier nachfragen!
