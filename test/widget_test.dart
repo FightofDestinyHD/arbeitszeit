@@ -49,40 +49,116 @@ void main() {
     expect(find.text('Stop'), findsOneWidget);
   });
 
-  testWidgets('Monthly target stays fixed when sessions are logged', (
-    WidgetTester tester,
-  ) async {
-    final now = DateTime.now();
-    final start = DateTime(now.year, now.month, now.day, 8, 0);
-    final end = DateTime(now.year, now.month, now.day, 18, 0);
+  testWidgets(
+    'Without planned shifts, logged sessions do not affect monthly overview (8h01 case)',
+    (WidgetTester tester) async {
+      final now = DateTime.now();
+      final day = DateTime(now.year, now.month, now.day);
+      final start = DateTime(now.year, now.month, now.day, 8, 0);
+      final end = DateTime(now.year, now.month, now.day, 18, 0);
 
-    SharedPreferences.setMockInitialValues(
-      _buildPrefs(
-        sessions: [
-          {
-            'start': start.toIso8601String(),
-            'end': end.toIso8601String(),
-            'paused_seconds': 0,
+      SharedPreferences.setMockInitialValues(
+        _buildPrefs(
+          sessions: [
+            {
+              'start': start.toIso8601String(),
+              'end': end.toIso8601String(),
+              'paused_seconds': 0,
+            },
+          ],
+          dayTypes: {_dayKey(start): 'worked'},
+          settings: {
+            'monthlyTargetHours': 169,
+            'dailyTargetHours': 8.0,
+            'reminderWorkForgotten': true,
+            'reminderBreakForgotten': false,
+            'reminderEndOfDay': true,
           },
-        ],
-        dayTypes: {_dayKey(start): 'worked'},
-        settings: {
-          'monthlyTargetHours': 160,
-          'dailyTargetHours': 8.0,
-          'reminderWorkForgotten': true,
-          'reminderBreakForgotten': false,
-          'reminderEndOfDay': true,
-        },
+        ),
+      );
+
+      await tester.pumpWidget(const MyApp());
+      await tester.pump(const Duration(milliseconds: 300));
+
+      await _scrollDown(tester, times: 2);
+
+      expect(find.text('Soll: 169h 00m'), findsOneWidget);
+      expect(find.text('Ist: 0h 00m'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'Without planned shifts, logged sessions do not affect monthly overview',
+    (WidgetTester tester) async {
+      final now = DateTime.now();
+      final start = DateTime(now.year, now.month, now.day, 8, 0);
+      final end = DateTime(now.year, now.month, now.day, 16, 1);
+
+      SharedPreferences.setMockInitialValues(
+        _buildPrefs(
+          sessions: [
+            {
+              'start': start.toIso8601String(),
+              'end': end.toIso8601String(),
+              'paused_seconds': 0,
+            },
+          ],
+          dayTypes: {_dayKey(start): 'worked'},
+          settings: {
+            'monthlyTargetHours': 169,
+            'dailyTargetHours': 8.0,
+            'reminderWorkForgotten': true,
+            'reminderBreakForgotten': false,
+            'reminderEndOfDay': true,
+          },
+        ),
+      );
+
+      await tester.pumpWidget(const MyApp());
+      await tester.pump(const Duration(milliseconds: 300));
+
+      await _scrollDown(tester, times: 2);
+      expect(find.text('Soll: 169h 00m'), findsOneWidget);
+      expect(find.text('Ist: 0h 00m'), findsOneWidget);
+    },
+  );
+
+  test('Deleting a session removes it from monthly collections', () async {
+    final now = DateTime.now();
+    final day = DateTime(now.year, now.month, now.day);
+    final plannedStart = DateTime(now.year, now.month, now.day, 9, 0);
+    final plannedEnd = DateTime(now.year, now.month, now.day, 17, 0);
+    final sessionStart = DateTime(now.year, now.month, now.day, 8, 0);
+    final sessionEnd = DateTime(now.year, now.month, now.day, 16, 1);
+
+    final result = removeSessionEntryFromCollections(
+      sessions: [
+        WorkSession(
+          start: sessionStart,
+          end: sessionEnd,
+          pausedDuration: Duration.zero,
+        ),
+      ],
+      plannedShifts: {
+        _dayKey(day): PlannedShift(
+          day: day,
+          start: plannedStart,
+          end: plannedEnd,
+          name: 'Tagesschicht',
+          pausedDuration: Duration.zero,
+        ),
+      },
+      dayTypes: {_dayKey(day): DayType.worked},
+      session: WorkSession(
+        start: sessionStart,
+        end: sessionEnd,
+        pausedDuration: Duration.zero,
       ),
     );
 
-    await tester.pumpWidget(const MyApp());
-    await tester.pump(const Duration(milliseconds: 300));
-
-    await _scrollDown(tester, times: 2);
-
-    expect(find.text('Soll: 160h 00m'), findsOneWidget);
-    expect(find.text('Ist: 10h 00m'), findsOneWidget);
+    expect(result.sessions, isEmpty);
+    expect(result.plannedShifts.containsKey(_dayKey(day)), isTrue);
+    expect(result.dayTypes[_dayKey(day)], DayType.worked);
   });
 
   testWidgets('Planned shift without work shows minus for today', (

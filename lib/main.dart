@@ -123,6 +123,88 @@ class PlannedShift {
 
 enum DayType { worked, vacation, sick, free }
 
+class CalendarEntryCollections {
+  const CalendarEntryCollections({
+    required this.sessions,
+    required this.plannedShifts,
+    required this.dayTypes,
+  });
+
+  final List<WorkSession> sessions;
+  final Map<String, PlannedShift> plannedShifts;
+  final Map<String, DayType> dayTypes;
+}
+
+String calendarDayKey(DateTime day) {
+  return '${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}';
+}
+
+bool calendarSameDay(DateTime a, DateTime b) {
+  return a.year == b.year && a.month == b.month && a.day == b.day;
+}
+
+CalendarEntryCollections removeSessionEntryFromCollections({
+  required List<WorkSession> sessions,
+  required Map<String, PlannedShift> plannedShifts,
+  required Map<String, DayType> dayTypes,
+  required WorkSession session,
+}) {
+  final updatedSessions = List<WorkSession>.from(sessions);
+  final updatedPlannedShifts = Map<String, PlannedShift>.from(plannedShifts);
+  final updatedDayTypes = Map<String, DayType>.from(dayTypes);
+  final key = calendarDayKey(session.start);
+
+  final index = updatedSessions.indexWhere(
+    (candidate) =>
+        candidate.start == session.start &&
+        candidate.end == session.end &&
+        candidate.pausedDuration == session.pausedDuration,
+  );
+  if (index != -1) {
+    updatedSessions.removeAt(index);
+  }
+
+  final hasPlannedShift = updatedPlannedShifts.containsKey(key);
+  final hasSession = updatedSessions.any(
+    (candidate) => calendarSameDay(candidate.start, session.start),
+  );
+  if (!hasPlannedShift && !hasSession && updatedDayTypes[key] == DayType.worked) {
+    updatedDayTypes.remove(key);
+  }
+
+  return CalendarEntryCollections(
+    sessions: updatedSessions,
+    plannedShifts: updatedPlannedShifts,
+    dayTypes: updatedDayTypes,
+  );
+}
+
+CalendarEntryCollections removePlannedShiftEntryFromCollections({
+  required List<WorkSession> sessions,
+  required Map<String, PlannedShift> plannedShifts,
+  required Map<String, DayType> dayTypes,
+  required DateTime day,
+}) {
+  final updatedSessions = List<WorkSession>.from(sessions);
+  final updatedPlannedShifts = Map<String, PlannedShift>.from(plannedShifts);
+  final updatedDayTypes = Map<String, DayType>.from(dayTypes);
+  final key = calendarDayKey(day);
+
+  updatedPlannedShifts.remove(key);
+
+  final hasPlannedShift = updatedPlannedShifts.containsKey(key);
+  final hasSession = updatedSessions.any((candidate) => calendarSameDay(candidate.start, day));
+  if (!hasPlannedShift && !hasSession && updatedDayTypes[key] == DayType.worked) {
+    updatedDayTypes.remove(key);
+  }
+
+  return CalendarEntryCollections(
+    sessions: updatedSessions,
+    plannedShifts: updatedPlannedShifts,
+    dayTypes: updatedDayTypes,
+  );
+}
+
 class AppSettings {
   const AppSettings({
     required this.monthlyTargetHours,
@@ -912,6 +994,33 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     return total;
   }
 
+  Duration monthDurationForOverview(DateTime month, {DateTime? until}) {
+    final firstDay = DateTime(month.year, month.month, 1);
+    final monthLastDay = DateTime(month.year, month.month + 1, 0);
+    final endDay = until == null
+        ? monthLastDay
+        : DateTime(until.year, until.month, until.day).isBefore(monthLastDay)
+        ? DateTime(until.year, until.month, until.day)
+        : monthLastDay;
+
+    var total = Duration.zero;
+    for (
+      var day = firstDay;
+      !day.isAfter(endDay);
+      day = day.add(const Duration(days: 1))
+    ) {
+      final hasPlannedShift = plannedDurationForDay(day) > Duration.zero;
+      final isActiveWorkday =
+          activeStart != null && isSameDay(activeStart!, day);
+      if (!hasPlannedShift && !isActiveWorkday) {
+        continue;
+      }
+      total += countedWorkDurationForDay(day);
+    }
+
+    return total;
+  }
+
   Duration monthlyTargetDuration(DateTime month) {
     return Duration(minutes: (settings.monthlyTargetHours * 60).round());
   }
@@ -1167,6 +1276,69 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     await persistState();
   }
 
+  List<WorkSession> sessionsForDay(DateTime day) {
+    return sessions.where((session) => isSameDay(session.start, day)).toList()
+      ..sort((left, right) => right.start.compareTo(left.start));
+  }
+
+  void syncWorkedDayType(DateTime day) {
+    final key = dayKey(day);
+    final hasPlannedShift = plannedShifts.containsKey(key);
+    final hasSession = sessions.any((session) => isSameDay(session.start, day));
+    final hasActiveSession =
+        activeStart != null && isSameDay(activeStart!, day);
+
+    if (hasPlannedShift || hasSession || hasActiveSession) {
+      dayTypes[key] = DayType.worked;
+    } else if (dayTypes[key] == DayType.worked) {
+      dayTypes.remove(key);
+    }
+  }
+
+  Future<void> deletePlannedShiftForDay(DateTime day) async {
+    final key = dayKey(day);
+    setState(() {
+      plannedShifts.remove(key);
+      syncWorkedDayType(day);
+    });
+    await persistState();
+    await syncWidgetData();
+  }
+
+  Future<void> deleteSessionForDay(WorkSession session) async {
+    final day = session.start;
+    setState(() {
+      final index = sessions.indexWhere(
+        (candidate) =>
+            candidate.start == session.start &&
+            candidate.end == session.end &&
+            candidate.pausedDuration == session.pausedDuration,
+      );
+      if (index != -1) {
+        sessions.removeAt(index);
+      }
+      syncWorkedDayType(day);
+    });
+    await persistState();
+    await syncWidgetData();
+  }
+
+  void removeSessionForDayLocal(WorkSession session) {
+    final day = session.start;
+    setState(() {
+      final index = sessions.indexWhere(
+        (candidate) =>
+            candidate.start == session.start &&
+            candidate.end == session.end &&
+            candidate.pausedDuration == session.pausedDuration,
+      );
+      if (index != -1) {
+        sessions.removeAt(index);
+      }
+      syncWorkedDayType(day);
+    });
+  }
+
   String formatTimeOfDay(TimeOfDay time) {
     final hour = time.hour.toString().padLeft(2, '0');
     final minute = time.minute.toString().padLeft(2, '0');
@@ -1236,7 +1408,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
         name: template.name,
         pausedDuration: pausedDuration,
       );
-      dayTypes[dayKey(day)] = DayType.worked;
+      syncWorkedDayType(day);
     });
     await persistState();
     await syncWidgetData();
@@ -1360,7 +1532,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     final todayBalance = hasTodayPlan
         ? todayWorked - todayTarget
         : Duration.zero;
-    final monthWorked = monthDuration(now, until: today);
+    final monthWorked = monthDurationForOverview(now, until: today);
     final monthTarget = monthlyTargetDuration(now);
 
     return _OverviewData(
@@ -1428,7 +1600,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     }
 
     final monthOvertime =
-        monthDuration(now, until: DateTime(now.year, now.month, now.day)) -
+        monthDurationForOverview(
+          now,
+          until: DateTime(now.year, now.month, now.day),
+        ) -
         monthlyTargetDuration(now);
 
     return _StatsData(
@@ -2038,7 +2213,6 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       installingUpdate = true;
       updateMessage = 'Update wird heruntergeladen...';
     });
-
     try {
       final uri = Uri.tryParse(manifest.apkUrl);
       if (uri == null) {
@@ -2131,10 +2305,62 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
     }
   }
 
+  Widget buildDayEntriesCard(DateTime day) {
+    final plannedShift = plannedShifts[dayKey(day)];
+    final daySessions = sessionsForDay(day);
+    if (plannedShift == null && daySessions.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Einträge für ${DateFormat('dd.MM.yyyy').format(day)}',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            if (plannedShift != null)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.event_note),
+                title: Text(plannedShift.name),
+                subtitle: Text(
+                  '${formatTimeOfDay(TimeOfDay.fromDateTime(plannedShift.start))} - ${formatTimeOfDay(TimeOfDay.fromDateTime(plannedShift.end))} · ${formatDuration(plannedShift.duration)}',
+                ),
+                trailing: IconButton(
+                  onPressed: () => deletePlannedShiftForDay(day),
+                  icon: const Icon(Icons.delete_outline),
+                  tooltip: 'Geplante Schicht löschen',
+                ),
+              ),
+            ...daySessions.map(
+              (session) => ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.work_outline),
+                title: const Text('Schicht'),
+                subtitle: Text(
+                  '${formatTimeOfDay(TimeOfDay.fromDateTime(session.start))} - ${formatTimeOfDay(TimeOfDay.fromDateTime(session.end))} · ${formatDuration(session.duration)}',
+                ),
+                trailing: IconButton(
+                  onPressed: () => deleteSessionForDay(session),
+                  icon: const Icon(Icons.delete_outline),
+                  tooltip: 'Schicht löschen',
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget buildOverviewTab() {
     final data = buildOverviewData();
     final monthColor = colorForBalance(data.monthOverUnder, context);
-
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -2372,6 +2598,10 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       final baseColor = colorForDayType(type, context);
       final isWeekend =
           day.weekday == DateTime.saturday || day.weekday == DateTime.sunday;
+        final dayKeyValue = dayKey(day);
+        final hasPlannedShift = plannedShifts.containsKey(dayKeyValue);
+        final hasSession = sessions.any((session) => isSameDay(session.start, day));
+        final hasEntry = hasPlannedShift || hasSession;
 
       Color backgroundColor;
       Color textColor;
@@ -2398,24 +2628,44 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
       }
 
       return Center(
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          width: 32,
-          height: 24,
-          decoration: BoxDecoration(
-            color: backgroundColor,
-            borderRadius: BorderRadius.circular(999),
-            border: border,
-          ),
+        child: Stack(
           alignment: Alignment.center,
-          child: Text(
-            '${day.day}',
-            style: TextStyle(
-              fontWeight: selected || today ? FontWeight.w700 : FontWeight.w500,
-              color: textColor,
-              fontSize: 12,
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              width: 32,
+              height: 24,
+              decoration: BoxDecoration(
+                color: backgroundColor,
+                borderRadius: BorderRadius.circular(999),
+                border: border,
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                '${day.day}',
+                style: TextStyle(
+                  fontWeight:
+                      selected || today ? FontWeight.w700 : FontWeight.w500,
+                  color: textColor,
+                  fontSize: 12,
+                ),
+              ),
             ),
-          ),
+            if (hasEntry)
+              Positioned(
+                bottom: 1,
+                child: Container(
+                  width: 5,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: hasPlannedShift
+                        ? const Color(0xFF2F80ED)
+                        : Colors.green,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+          ],
         ),
       );
     }
@@ -2742,6 +2992,8 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
               )
               .toList(),
         ),
+        const SizedBox(height: 12),
+        buildDayEntriesCard(selectedDay),
         const SizedBox(height: 12),
         Card(
           child: Padding(
