@@ -1647,9 +1647,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                       ),
                       keyboardType: TextInputType.text,
                       inputFormatters: [
-                        FilteringTextInputFormatter.allow(
-                          RegExp(r'[0-9:]'),
-                        ),
+                        FilteringTextInputFormatter.allow(RegExp(r'[0-9:]')),
                       ],
                       onChanged: (value) {
                         applyNormalizedTimeInput(startController, value);
@@ -1666,9 +1664,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                       ),
                       keyboardType: TextInputType.text,
                       inputFormatters: [
-                        FilteringTextInputFormatter.allow(
-                          RegExp(r'[0-9:]'),
-                        ),
+                        FilteringTextInputFormatter.allow(RegExp(r'[0-9:]')),
                       ],
                       onChanged: (value) {
                         applyNormalizedTimeInput(endController, value);
@@ -3734,9 +3730,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                       ),
                       keyboardType: TextInputType.text,
                       inputFormatters: [
-                        FilteringTextInputFormatter.allow(
-                          RegExp(r'[0-9:]'),
-                        ),
+                        FilteringTextInputFormatter.allow(RegExp(r'[0-9:]')),
                       ],
                       onChanged: (value) {
                         applyNormalizedTimeInput(startController, value);
@@ -3753,9 +3747,7 @@ class _WorkTimeHomePageState extends State<WorkTimeHomePage> {
                       ),
                       keyboardType: TextInputType.text,
                       inputFormatters: [
-                        FilteringTextInputFormatter.allow(
-                          RegExp(r'[0-9:]'),
-                        ),
+                        FilteringTextInputFormatter.allow(RegExp(r'[0-9:]')),
                       ],
                       onChanged: (value) {
                         applyNormalizedTimeInput(endController, value);
